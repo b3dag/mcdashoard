@@ -1,0 +1,29 @@
+# Example systemd user unit for a Minecraft server.
+# Copy to ~/.config/systemd/user/mc-vanilla.service
+# Adjust WorkingDirectory and ExecStart for each server you add.
+#
+# After copying:
+#   systemctl --user daemon-reload
+#   systemctl --user enable mc-vanilla
+#   systemctl --user start mc-vanilla
+#
+# Make sure `loginctl enable-linger <user>` is set so user services
+# stay running after you log out.
+
+[Unit]
+Description=Minecraft Vanilla server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/mcserv/fabric01
+ExecStart=/usr/bin/java -Xms2G -Xmx4G -jar fabric-server-launch.jar nogui
+Restart=on-failure
+RestartSec=10
+
+TimeoutStopSec=60
+KillMode=mixed
+
+[Install]
+WantedBy=default.target

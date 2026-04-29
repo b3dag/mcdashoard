@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>servers - brotalius dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main>
+    <h1>servers</h1>
+    <p class="muted">servers you have access to.</p>
+    <div id="list" class="mt-2"></div>
+  </main>
+
+  <script type="module">
+    import { api, renderHeader, renderFooter, el } from '/app.js';
+
+    const me = await renderHeader('home');
+    if (me) {
+      renderFooter();
+      const listEl = document.getElementById('list');
+      const { servers } = await api('/api/servers');
+
+      if (!servers.length) {
+        listEl.appendChild(el('p', { class: 'muted' }, 'no servers assigned to you yet.'));
+      }
+
+      for (const s of servers) {
+        const card = el('div', { class: 'server-card' }, [
+          el('div', { class: 'meta' }, [
+            el('span', { class: 'dot' + (s.running ? '' : ' offline') }),
+            el('span', { class: 'name' }, s.display_name || s.name),
+            el('span', { class: 'role-tag' }, s.role),
+          ]),
+          el('div', { class: 'row' }, [
+            el('a', { class: 'btn', href: '/server.html?name=' + encodeURIComponent(s.name) }, 'open'),
+            !s.running
+              ? el('button', {
+                  class: 'btn primary',
+                  onclick: async (e) => {
+                    e.target.disabled = true;
+                    e.target.textContent = 'starting...';
+                    try {
+                      await api('/api/servers/' + encodeURIComponent(s.name) + '/start', { method: 'POST' });
+                      location.reload();
+                    } catch (err) {
+                      alert(err.message);
+                      e.target.disabled = false;
+                      e.target.textContent = 'start';
+                    }
+                  },
+                }, 'start')
+              : el('span', { class: 'muted' }, 'running'),
+          ]),
+        ]);
+        listEl.appendChild(card);
+      }
+    }
+  </script>
+</body>
+</html>

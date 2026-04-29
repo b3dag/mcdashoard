@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>log in - brotalius dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main>
+    <h1>log in</h1>
+    <p class="muted">brotalius dashboard</p>
+
+    <form class="form mt-2" id="login-form">
+      <div class="form-group">
+        <label for="username">username</label>
+        <input type="text" id="username" required autocomplete="username" autofocus />
+      </div>
+      <div class="form-group">
+        <label for="password">password</label>
+        <input type="password" id="password" required autocomplete="current-password" />
+      </div>
+      <button type="submit" class="btn primary" id="submit">log in</button>
+      <p class="form-status" id="status"></p>
+    </form>
+  </main>
+
+  <script type="module">
+    import { api } from '/app.js';
+
+    const form   = document.getElementById('login-form');
+    const status = document.getElementById('status');
+    const btn    = document.getElementById('submit');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      btn.disabled = true;
+      status.textContent = '';
+      status.className   = 'form-status';
+      try {
+        await api('/api/auth/login', {
+          method: 'POST',
+          body: {
+            username: document.getElementById('username').value.trim(),
+            password: document.getElementById('password').value,
+          },
+        });
+        location.href = '/index.html';
+      } catch (err) {
+        status.textContent = err.message;
+        status.classList.add('error');
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>server - brotalius dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main id="main"></main>
+
+  <script type="module">
+    import { api, renderHeader, renderFooter, el } from '/app.js';
+
+    const params = new URLSearchParams(location.search);
+    const name   = params.get('name');
+    if (!name) location.href = '/index.html';
+
+    const me = await renderHeader();
+    if (!me) throw new Error();
+    renderFooter();
+
+    const main = document.getElementById('main');
+
+    const { servers } = await api('/api/servers');
+    const server = servers.find(s => s.name === name);
+    if (!server) {
+      main.appendChild(el('h1', {}, 'no access'));
+      main.appendChild(el('p', { class: 'muted' }, 'you do not have permission to view this server.'));
+      throw new Error();
+    }
+
+    const isOperator = me.is_super || server.role === 'operator';
+
+    main.appendChild(el('h1', {}, server.display_name || server.name));
+    main.appendChild(el('p', { class: 'muted' }, [
+      el('span', { class: 'dot' + (server.running ? '' : ' offline'), style: 'margin-right:0.5rem;' }),
+      server.running ? 'running' : 'stopped',
+      '   ·   role: ' + server.role,
+    ]));
+
+    const power = el('div', { class: 'row mt-2' }, []);
+    if (!server.running) {
+      power.appendChild(button('start', 'btn primary', '/api/servers/' + name + '/start'));
+    } else if (isOperator) {
+      power.appendChild(button('stop',    'btn danger', '/api/servers/' + name + '/stop'));
+      power.appendChild(button('restart', 'btn warn',   '/api/servers/' + name + '/restart'));
+    }
+    main.appendChild(power);
+
+    function button(label, cls, url) {
+      return el('button', {
+        class: cls,
+        onclick: async (e) => {
+          if (label !== 'start' && !confirm(label + ' ' + name + '?')) return;
+          e.target.disabled = true;
+          e.target.textContent = label + '...';
+          try {
+            await api(url, { method: 'POST' });
+            location.reload();
+          } catch (err) {
+            alert(err.message);
+            e.target.disabled = false;
+            e.target.textContent = label;
+          }
+        },
+      }, label);
+    }
+
+    if (isOperator) {
+      main.appendChild(el('h2', {}, 'whitelist'));
+      const wlInput = el('input', { type: 'text', placeholder: 'minecraft username' });
+      const wlOut   = el('div', { class: 'console' });
+      main.appendChild(el('div', { class: 'row' }, [
+        wlInput,
+        el('button', { class: 'btn primary', onclick: () => doWl('add') }, 'add'),
+        el('button', { class: 'btn danger',  onclick: () => doWl('remove') }, 'remove'),
+        el('button', { class: 'btn', onclick: async () => {
+          try {
+            const r = await api('/api/servers/' + name + '/whitelist');
+            wlOut.textContent = r.result || '(empty)';
+          } catch (err) { wlOut.textContent = 'error: ' + err.message; }
+        }}, 'list'),
+      ]));
+      main.appendChild(wlOut);
+
+      async function doWl(action) {
+        const username = wlInput.value.trim();
+        if (!username) return;
+        try {
+          const r = await api('/api/servers/' + name + '/whitelist/' + action, {
+            method: 'POST', body: { username },
+          });
+          wlOut.textContent = r.result || '(no output)';
+          wlInput.value = '';
+        } catch (err) { wlOut.textContent = 'error: ' + err.message; }
+      }
+
+      main.appendChild(el('h2', {}, 'console'));
+      main.appendChild(el('p', { class: 'muted' }, 'sends a command via RCON. server must be running.'));
+      const cmdInput = el('input', { type: 'text', placeholder: 'e.g. say hello' });
+      const cmdOut   = el('div', { class: 'console' });
+      cmdInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendCmd(); });
+      main.appendChild(el('div', { class: 'row' }, [
+        cmdInput,
+        el('button', { class: 'btn primary', onclick: sendCmd }, 'send'),
+      ]));
+      main.appendChild(cmdOut);
+
+      async function sendCmd() {
+        const command = cmdInput.value.trim();
+        if (!command) return;
+        try {
+          const r = await api('/api/servers/' + name + '/console', {
+            method: 'POST', body: { command },
+          });
+          cmdOut.textContent = '> ' + command + '\n' + (r.result || '') + '\n\n' + cmdOut.textContent;
+          cmdInput.value = '';
+        } catch (err) { cmdOut.textContent = 'error: ' + err.message + '\n\n' + cmdOut.textContent; }
+      }
+
+      main.appendChild(el('h2', {}, 'files'));
+      main.appendChild(el('p', { class: 'muted' }, 'browse and edit text files inside the server folder.'));
+      main.appendChild(el('p', {}, el('a', { href: '/files.html?name=' + encodeURIComponent(name) }, 'open file browser →')));
+    }
+  </script>
+</body>
+</html>

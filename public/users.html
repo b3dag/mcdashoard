@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>users - brotalius dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main id="main"></main>
+
+  <script type="module">
+    import { api, renderHeader, renderFooter, el, fmtDate } from '/app.js';
+
+    const me = await renderHeader('users');
+    if (!me) throw new Error();
+    renderFooter();
+
+    const main = document.getElementById('main');
+
+    if (!me.is_super) {
+      main.appendChild(el('h1', {}, 'no access'));
+      main.appendChild(el('p', { class: 'muted' }, 'super-operator only.'));
+      throw new Error();
+    }
+
+    main.appendChild(el('h1', {}, 'users'));
+    main.appendChild(el('p', { class: 'muted' }, 'manage dashboard accounts and per-server roles.'));
+
+    main.appendChild(el('h2', {}, 'create user'));
+    const newU = el('input', { type: 'text',     placeholder: 'username' });
+    const newP = el('input', { type: 'password', placeholder: 'password (12+ chars)' });
+    const newS = el('label', { class: 'row muted' }, [
+      el('input', { type: 'checkbox', id: 'new-super' }), ' super-operator',
+    ]);
+    main.appendChild(el('div', { class: 'row' }, [
+      newU, newP, newS,
+      el('button', { class: 'btn primary', onclick: createUser }, 'create'),
+    ]));
+
+    async function createUser() {
+      try {
+        await api('/api/users', {
+          method: 'POST',
+          body: {
+            username: newU.value.trim(),
+            password: newP.value,
+            is_super: document.getElementById('new-super').checked,
+          },
+        });
+        newU.value = ''; newP.value = '';
+        document.getElementById('new-super').checked = false;
+        await refresh();
+      } catch (err) { alert(err.message); }
+    }
+
+    main.appendChild(el('h2', {}, 'existing users'));
+    const userList = el('div');
+    main.appendChild(userList);
+
+    const serverList = (await api('/api/servers')).servers;
+
+    await refresh();
+
+    async function refresh() {
+      userList.innerHTML = '';
+      const { users } = await api('/api/users');
+
+      for (const u of users) {
+        const block = el('div', { class: 'list mt-1' });
+
+        block.appendChild(el('div', { class: 'list-row' }, [
+          el('span', { class: 'name' }, [
+            u.username,
+            u.is_super ? el('span', { class: 'role-tag', style: 'margin-left:0.5rem;' }, 'super') : null,
+          ]),
+          el('span', { class: 'muted' }, 'created ' + fmtDate(u.created_at)),
+          el('div', { class: 'actions' }, [
+            u.id === me.id ? el('span', { class: 'muted' }, '(you)') :
+              el('button', { class: 'btn', onclick: () => toggleSuper(u) }, u.is_super ? 'remove super' : 'make super'),
+            u.id === me.id ? null :
+              el('button', { class: 'btn', onclick: () => resetPassword(u) }, 'reset password'),
+            u.id === me.id ? null :
+              el('button', { class: 'btn danger', onclick: () => deleteUser(u) }, 'delete'),
+          ]),
+        ]));
+
+        for (const s of serverList) {
+          const current = u.permissions[s.name] || '';
+          const select = el('select', {}, [
+            el('option', { value: '' }, '— no access —'),
+            el('option', { value: 'starter'  }, 'starter'),
+            el('option', { value: 'operator' }, 'operator'),
+          ]);
+          select.value = current;
+          select.addEventListener('change', async () => {
+            try {
+              if (select.value === '') {
+                await api('/api/users/' + u.id + '/permissions/' + s.name, { method: 'DELETE' });
+              } else {
+                await api('/api/users/' + u.id + '/permissions/' + s.name, {
+                  method: 'PUT', body: { role: select.value },
+                });
+              }
+            } catch (err) { alert(err.message); select.value = current; }
+          });
+          block.appendChild(el('div', { class: 'list-row' }, [
+            el('span', { class: 'name muted' }, s.display_name || s.name),
+            select,
+          ]));
+        }
+
+        userList.appendChild(block);
+      }
+    }
+
+    async function toggleSuper(u) {
+      if (!confirm((u.is_super ? 'remove' : 'grant') + ' super-operator on "' + u.username + '"?')) return;
+      try {
+        await api('/api/users/' + u.id + '/super', { method: 'PUT', body: { is_super: !u.is_super } });
+        await refresh();
+      } catch (err) { alert(err.message); }
+    }
+    async function resetPassword(u) {
+      const p = prompt('new password for "' + u.username + '" (12+ chars):');
+      if (!p) return;
+      try {
+        await api('/api/users/' + u.id + '/password', { method: 'PUT', body: { password: p } });
+        alert('password reset. user has been logged out.');
+      } catch (err) { alert(err.message); }
+    }
+    async function deleteUser(u) {
+      if (!confirm('delete "' + u.username + '"? this is permanent.')) return;
+      try { await api('/api/users/' + u.id, { method: 'DELETE' }); await refresh(); }
+      catch (err) { alert(err.message); }
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>terminal - brotalius dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    main { padding: 0 !important; max-width: none !important; }
+    .term-frame { width: 100%; height: calc(100vh - 60px); border: none; display: block; }
+    .term-warning { padding: 0.5rem 1rem; background: #2a1a1a; color: var(--warn); font-size: 0.78rem; border-bottom: 1px solid var(--border); }
+  </style>
+</head>
+<body>
+  <main id="main">
+    <div class="term-warning">⚠ shell as the dashboard user · super-operator only · all activity logged by the system</div>
+    <iframe class="term-frame" src="/terminal/" title="terminal"></iframe>
+  </main>
+
+  <script type="module">
+    import { renderHeader } from '/app.js';
+    const me = await renderHeader('terminal');
+    if (!me) throw new Error();
+    if (!me.is_super) {
+      document.getElementById('main').innerHTML = '<h1 style="padding:2.5rem">no access</h1><p style="padding:0 2.5rem" class="muted">super-operator only.</p>';
+    }
+  </script>
+</body>
+</html>

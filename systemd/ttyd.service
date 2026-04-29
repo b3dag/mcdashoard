@@ -1,0 +1,12 @@
+[Unit]
+Description=ttyd web terminal
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ttyd --port 7681 --interface 127.0.0.1 --writable bash
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

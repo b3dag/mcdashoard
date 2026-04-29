@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>files - brotalius dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main id="main"></main>
+
+  <script type="module">
+    import { api, renderHeader, renderFooter, el, fmtDate } from '/app.js';
+
+    const params = new URLSearchParams(location.search);
+    const name   = params.get('name');
+    if (!name) location.href = '/index.html';
+
+    const me = await renderHeader();
+    if (!me) throw new Error();
+    renderFooter();
+
+    const main = document.getElementById('main');
+    main.appendChild(el('h1', {}, 'files'));
+    main.appendChild(el('p', { class: 'muted' },
+      el('a', { href: '/server.html?name=' + encodeURIComponent(name) }, '← back to server'),
+      ' · ' + name));
+
+    let cwd = '.';
+
+    const breadcrumb = el('p', { class: 'muted mt-2' });
+    main.appendChild(breadcrumb);
+
+    const listEl = el('div', { class: 'list mt-1' });
+    main.appendChild(listEl);
+
+    const editor = el('div', { class: 'hidden mt-3' });
+    main.appendChild(editor);
+
+    await refresh();
+
+    async function refresh() {
+      breadcrumb.textContent = 'path: ' + cwd;
+      listEl.innerHTML = '';
+      editor.classList.add('hidden');
+
+      let res;
+      try { res = await api('/api/servers/' + name + '/files?path=' + encodeURIComponent(cwd)); }
+      catch (err) {
+        listEl.appendChild(el('div', { class: 'list-row' }, 'error: ' + err.message));
+        return;
+      }
+
+      listEl.appendChild(el('div', { class: 'list-row head' }, [
+        el('span', { class: 'name' }, 'name'),
+        el('span', {}, 'size'),
+        el('span', {}, 'modified'),
+      ]));
+
+      if (cwd !== '.') {
+        listEl.appendChild(el('div', {
+          class: 'list-row',
+          style: 'cursor:pointer;',
+          onclick: () => {
+            const parts = cwd.split('/').filter(Boolean);
+            parts.pop();
+            cwd = parts.length ? parts.join('/') : '.';
+            refresh();
+          },
+        }, [
+          el('span', { class: 'name' }, '.. (parent)'),
+        ]));
+      }
+
+      for (const it of res.items) {
+        const row = el('div', { class: 'list-row', style: 'cursor:pointer;' }, [
+          el('span', { class: 'name' }, (it.type === 'dir' ? '📁 ' : '📄 ') + it.name),
+          el('span', { class: 'muted' }, it.type === 'file' ? formatSize(it.size) : ''),
+          el('span', { class: 'muted' }, fmtDate(it.mtime)),
+        ]);
+        row.addEventListener('click', () => {
+          const next = cwd === '.' ? it.name : cwd + '/' + it.name;
+          if (it.type === 'dir') { cwd = next; refresh(); }
+          else if (it.type === 'file') { openFile(next); }
+        });
+        listEl.appendChild(row);
+      }
+    }
+
+    async function openFile(path) {
+      let res;
+      try { res = await api('/api/servers/' + name + '/file?path=' + encodeURIComponent(path)); }
+      catch (err) { alert(err.message); return; }
+
+      editor.innerHTML = '';
+      editor.classList.remove('hidden');
+      editor.appendChild(el('h2', {}, 'editing ' + path));
+
+      const ta = el('textarea', {}, res.content);
+      ta.style.width = '100%';
+      ta.style.minHeight = '400px';
+      ta.style.fontFamily = 'inherit';
+      ta.style.fontSize = '0.85rem';
+      ta.style.background = '#050505';
+      ta.style.color = 'var(--norm)';
+      ta.style.border = '1px solid var(--border)';
+      ta.style.padding = '0.6rem';
+      editor.appendChild(ta);
+
+      const status = el('p', { class: 'form-status' });
+      editor.appendChild(el('div', { class: 'row mt-1' }, [
+        el('button', {
+          class: 'btn primary',
+          onclick: async (e) => {
+            e.target.disabled = true;
+            try {
+              await api('/api/servers/' + name + '/file', {
+                method: 'PUT',
+                body: { path, content: ta.value },
+              });
+              status.textContent = 'saved.';
+              status.className = 'form-status success';
+            } catch (err) {
+              status.textContent = err.message;
+              status.className = 'form-status error';
+            } finally { e.target.disabled = false; }
+          },
+        }, 'save'),
+        el('button', {
+          class: 'btn',
+          onclick: () => { editor.classList.add('hidden'); },
+        }, 'cancel'),
+        status,
+      ]));
+    }
+
+    function formatSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+    }
+  </script>
+</body>
+</html>

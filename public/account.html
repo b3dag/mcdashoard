@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>account - brotalius dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main>
+    <h1>account</h1>
+    <p class="muted">change your password.</p>
+
+    <form class="form mt-2" id="pw-form">
+      <div class="form-group">
+        <label for="current">current password</label>
+        <input type="password" id="current" required autocomplete="current-password" />
+      </div>
+      <div class="form-group">
+        <label for="next">new password (12+ chars)</label>
+        <input type="password" id="next" required minlength="12" autocomplete="new-password" />
+      </div>
+      <button type="submit" class="btn primary">update</button>
+      <p class="form-status" id="status"></p>
+    </form>
+  </main>
+
+  <script type="module">
+    import { api, renderHeader, renderFooter } from '/app.js';
+
+    const me = await renderHeader('account');
+    if (!me) throw new Error();
+    renderFooter();
+
+    const form   = document.getElementById('pw-form');
+    const status = document.getElementById('status');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      status.textContent = '';
+      status.className = 'form-status';
+      try {
+        await api('/api/auth/change-password', {
+          method: 'POST',
+          body: {
+            current: document.getElementById('current').value,
+            next:    document.getElementById('next').value,
+          },
+        });
+        status.textContent = 'updated.';
+        status.classList.add('success');
+        form.reset();
+      } catch (err) {
+        status.textContent = err.message;
+        status.classList.add('error');
+      }
+    });
+  </script>
+</body>
+</html>
