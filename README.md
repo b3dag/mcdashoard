@@ -5,9 +5,9 @@ A self-hosted web dashboard for managing Minecraft servers on a Linux box. Login
 ```
 ┌─────────────────────────────────────────────────────┐
 │            dash.brotalius.com (HTTPS)               │
-│                       │                              │
+│                       │                             │
 │            Cloudflare Tunnel                        │
-│                       │                              │
+│                       │                             │
 │        ┌──────────────▼──────────────┐              │
 │        │   Node.js / Fastify         │              │
 │        │   on 127.0.0.1:8080         │              │
@@ -19,7 +19,7 @@ A self-hosted web dashboard for managing Minecraft servers on a Linux box. Login
 │        │   - sandboxed file editor   │              │
 │        │   - ttyd proxy (optional)   │              │
 │        └──────────────┬──────────────┘              │
-│                       │                              │
+│                       │                             │
 │        ┌──────────────▼──────────────┐              │
 │        │  Minecraft (systemd user    │              │
 │        │  services + RCON)           │              │
