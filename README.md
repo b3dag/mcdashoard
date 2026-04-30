@@ -350,7 +350,7 @@ server-port=25566
 ## Step 3 — Create the systemd unit
 
 ```bash
-mkdir -p ~/.config/systemd/user
+mkdir -p ~/.config/systemd/user       #sometimes the folder doesnt exist idk
 cp /srv/dashboard/systemd/mc-vanilla.service ~/.config/systemd/user/mc-creative01.service
 nano ~/.config/systemd/user/mc-creative01.service
 ```
