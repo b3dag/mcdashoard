@@ -288,6 +288,8 @@ Bad: `Creative 01`, `Vanilla!`, `CREATIVE`
 ## Step 1 — Create the server folder and download the jar
 
 ```bash
+sudo mkdir -p /srv/mcserv
+sudo chown -R $USER:$USER /srv/mcserv
 cd /srv/mcserv
 mkdir creative01
 cd creative01
