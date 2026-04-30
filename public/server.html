@@ -38,20 +38,8 @@
     }
     .player-name { font-weight: bold; font-size: 1rem; }
     .player-detail { font-size: 0.85rem; color: var(--fg-muted, #888); font-family: monospace; white-space: pre; }
-    .health-bar {
-      display: inline-block;
-      width: 100%;
-      height: 6px;
-      background: var(--border, #333);
-      border-radius: 4px;
-      margin-top: 0.25rem;
-    }
-    .health-bar-fill {
-      height: 100%;
-      border-radius: 4px;
-      background: #e05252;
-      transition: width 0.3s;
-    }
+    .mc-bar { display: flex; gap: 1px; margin-top: 0.2rem; font-size: 1rem; line-height: 1; }
+    .mc-bar span { display: inline-block; }
   </style>
 </head>
 <body>
@@ -231,7 +219,7 @@
               const [posRaw, hpRaw, foodRaw, dimRaw] = await Promise.all([
                 rcon('data get entity ' + pname + ' Pos'),
                 rcon('data get entity ' + pname + ' Health'),
-                rcon('data get entity ' + pname + ' FoodLevel'),
+                rcon('data get entity ' + pname + ' foodLevel'),
                 rcon('data get entity ' + pname + ' Dimension'),
               ]);
 
@@ -242,7 +230,6 @@
 
               const hpMatch  = hpRaw.match(/([\d.]+)f$/);
               const hp       = hpMatch ? parseFloat(hpMatch[1]) : null;
-              const hpPct    = hp !== null ? Math.round((hp / 20) * 100) : null;
 
               const foodMatch = foodRaw.match(/(\d+)$/);
               const food      = foodMatch ? parseInt(foodMatch[1]) : null;
@@ -251,17 +238,45 @@
               const dim      = dimMatch ? dimMatch[1].replace('minecraft:', '').replace(/_/g, ' ') : '—';
 
               let text = 'pos:    ' + pos + '\n';
-              text    += 'world:  ' + dim + '\n';
-              text    += 'health: ' + (hp !== null ? hp.toFixed(1) + ' / 20' : '—') + '\n';
-              text    += 'food:   ' + (food !== null ? food + ' / 20' : '—');
+              text    += 'world:  ' + dim;
               detail.textContent = text;
 
-              if (hpPct !== null) {
-                const bar  = el('div', { class: 'health-bar' });
-                const fill = el('div', { class: 'health-bar-fill' });
-                fill.style.width = hpPct + '%';
-                bar.appendChild(fill);
-                card.appendChild(bar);
+              if (hp !== null) {
+                const hpLabel = el('div', { class: 'player-detail' }, '♥ health: ' + hp.toFixed(1) + ' / 20');
+                card.appendChild(hpLabel);
+                const hpBar = el('div', { class: 'mc-bar' });
+                for (let i = 0; i < 10; i++) {
+                  const threshold = (i + 1) * 2;
+                  let s;
+                  if (hp >= threshold) {
+                    s = el('span', {}, '♥'); s.style.color = '#e05252';
+                  } else if (hp >= threshold - 1) {
+                    s = el('span', {}, '♥'); s.style.color = '#e05252'; s.style.opacity = '0.45';
+                  } else {
+                    s = el('span', {}, '♥'); s.style.color = '#444';
+                  }
+                  hpBar.appendChild(s);
+                }
+                card.appendChild(hpBar);
+              }
+
+              if (food !== null) {
+                const foodLabel = el('div', { class: 'player-detail' }, '🍗 food:   ' + food + ' / 20');
+                const foodBar = el('div', { class: 'mc-bar' });
+                for (let i = 0; i < 10; i++) {
+                  const threshold = (i + 1) * 2;
+                  let s;
+                  if (food >= threshold) {
+                    s = el('span', {}, '🍗');
+                  } else if (food >= threshold - 1) {
+                    s = el('span', {}, '🍗'); s.style.opacity = '0.4';
+                  } else {
+                    s = el('span', {}, '🍗'); s.style.opacity = '0.15';
+                  }
+                  foodBar.appendChild(s);
+                }
+                card.appendChild(foodLabel);
+                card.appendChild(foodBar);
               }
             } catch {
               detail.textContent = 'could not fetch details';
