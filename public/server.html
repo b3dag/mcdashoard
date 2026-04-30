@@ -5,6 +5,54 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>server - brotalius dashboard</title>
   <link rel="stylesheet" href="/style.css" />
+  <style>
+    .collapsible-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .collapsible-header h2 { margin: 0; }
+    .collapse-arrow {
+      font-size: 0.75rem;
+      color: var(--fg-muted, #888);
+      transition: transform 0.2s;
+    }
+    .collapsible-header.collapsed .collapse-arrow { transform: rotate(-90deg); }
+    .collapsible-body.collapsed { display: none; }
+
+    .player-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+    .player-card {
+      border: 1px solid var(--border, #333);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    .player-name { font-weight: bold; font-size: 1rem; }
+    .player-detail { font-size: 0.85rem; color: var(--fg-muted, #888); font-family: monospace; white-space: pre; }
+    .health-bar {
+      display: inline-block;
+      width: 100%;
+      height: 6px;
+      background: var(--border, #333);
+      border-radius: 4px;
+      margin-top: 0.25rem;
+    }
+    .health-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      background: #e05252;
+      transition: width 0.3s;
+    }
+  </style>
 </head>
 <body>
   <main id="main"></main>
@@ -67,11 +115,28 @@
       }, label);
     }
 
+    /* ---- collapsible section helper ---- */
+    function collapsible(title, startCollapsed = false) {
+      const arrow  = el('span', { class: 'collapse-arrow' }, '▼');
+      const header = el('div', { class: 'collapsible-header' + (startCollapsed ? ' collapsed' : '') }, [
+        el('h2', {}, title), arrow,
+      ]);
+      const body = el('div', { class: 'collapsible-body' + (startCollapsed ? ' collapsed' : '') });
+      header.addEventListener('click', () => {
+        const nowCollapsed = header.classList.toggle('collapsed');
+        body.classList.toggle('collapsed', nowCollapsed);
+      });
+      main.appendChild(el('div', { class: 'mt-2' }, [header, body]));
+      return body;
+    }
+
     if (isOperator) {
-      main.appendChild(el('h2', {}, 'whitelist'));
+
+      /* ---- whitelist ---- */
+      const wlBody  = collapsible('whitelist', true);
       const wlInput = el('input', { type: 'text', placeholder: 'minecraft username' });
       const wlOut   = el('div', { class: 'console' });
-      main.appendChild(el('div', { class: 'row' }, [
+      wlBody.appendChild(el('div', { class: 'row' }, [
         wlInput,
         el('button', { class: 'btn primary', onclick: () => doWl('add') }, 'add'),
         el('button', { class: 'btn danger',  onclick: () => doWl('remove') }, 'remove'),
@@ -82,7 +147,7 @@
           } catch (err) { wlOut.textContent = 'error: ' + err.message; }
         }}, 'list'),
       ]));
-      main.appendChild(wlOut);
+      wlBody.appendChild(wlOut);
 
       async function doWl(action) {
         const username = wlInput.value.trim();
@@ -96,16 +161,17 @@
         } catch (err) { wlOut.textContent = 'error: ' + err.message; }
       }
 
-      main.appendChild(el('h2', {}, 'console'));
-      main.appendChild(el('p', { class: 'muted' }, 'sends a command via RCON. server must be running.'));
+      /* ---- console ---- */
+      const conBody  = collapsible('console', true);
+      conBody.appendChild(el('p', { class: 'muted' }, 'sends a command via RCON. server must be running.'));
       const cmdInput = el('input', { type: 'text', placeholder: 'e.g. say hello' });
       const cmdOut   = el('div', { class: 'console' });
       cmdInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendCmd(); });
-      main.appendChild(el('div', { class: 'row' }, [
+      conBody.appendChild(el('div', { class: 'row' }, [
         cmdInput,
         el('button', { class: 'btn primary', onclick: sendCmd }, 'send'),
       ]));
-      main.appendChild(cmdOut);
+      conBody.appendChild(cmdOut);
 
       async function sendCmd() {
         const command = cmdInput.value.trim();
@@ -119,42 +185,155 @@
         } catch (err) { cmdOut.textContent = 'error: ' + err.message + '\n\n' + cmdOut.textContent; }
       }
 
-      /* ---------- logs ---------- */
-      main.appendChild(el('h2', {}, 'logs'));
-      main.appendChild(el('p', { class: 'muted' },
-        'recent output from journalctl. shows the last 200 lines of the systemd unit log.'));
+      /* ---- online players ---- */
+      const plBody    = collapsible('online players', false);
+      const plStatus  = el('p', { class: 'muted' }, server.running ? 'loading...' : 'server is offline.');
+      const plGrid    = el('div', { class: 'player-grid' });
+      const plRefresh = el('button', { class: 'btn primary', onclick: () => loadPlayers() }, 'refresh');
+      plBody.appendChild(el('div', { class: 'row' }, [plRefresh]));
+      plBody.appendChild(plStatus);
+      plBody.appendChild(plGrid);
 
-      const logOut = el('pre', { class: 'console', style: 'max-height: 500px;' }, 'loading...');
+      async function rcon(command) {
+        const r = await api('/api/servers/' + name + '/console', {
+          method: 'POST', body: { command },
+        });
+        return r.result || '';
+      }
 
-      const refreshBtn = el('button', { class: 'btn primary', onclick: () => loadLogs() }, 'refresh');
-      const downloadBtn = el('a', {
+      async function loadPlayers() {
+        plRefresh.disabled = true;
+        plRefresh.textContent = 'loading...';
+        plGrid.innerHTML = '';
+        plStatus.textContent = '';
+        try {
+          const listResult = await rcon('list');
+          /* "There are 2 of a max of 20 players online: mael, hellmut" */
+          const match = listResult.match(/:\s*(.+)$/);
+          const names = match && match[1].trim()
+            ? match[1].split(',').map(n => n.trim()).filter(Boolean)
+            : [];
+
+          if (names.length === 0) {
+            plStatus.textContent = 'no players online.';
+            return;
+          }
+          plStatus.textContent = names.length + ' player' + (names.length !== 1 ? 's' : '') + ' online';
+
+          for (const pname of names) {
+            const card   = el('div', { class: 'player-card' });
+            const detail = el('div', { class: 'player-detail' }, 'fetching...');
+            card.appendChild(el('div', { class: 'player-name' }, pname));
+            card.appendChild(detail);
+            plGrid.appendChild(card);
+
+            try {
+              const [posRaw, hpRaw, foodRaw, dimRaw] = await Promise.all([
+                rcon('data get entity ' + pname + ' Pos'),
+                rcon('data get entity ' + pname + ' Health'),
+                rcon('data get entity ' + pname + ' FoodLevel'),
+                rcon('data get entity ' + pname + ' Dimension'),
+              ]);
+
+              const posMatch  = posRaw.match(/\[([-\d.]+)d,\s*([-\d.]+)d,\s*([-\d.]+)d\]/);
+              const pos = posMatch
+                ? 'x ' + Math.round(posMatch[1]) + '  y ' + Math.round(posMatch[2]) + '  z ' + Math.round(posMatch[3])
+                : '—';
+
+              const hpMatch  = hpRaw.match(/([\d.]+)f$/);
+              const hp       = hpMatch ? parseFloat(hpMatch[1]) : null;
+              const hpPct    = hp !== null ? Math.round((hp / 20) * 100) : null;
+
+              const foodMatch = foodRaw.match(/(\d+)$/);
+              const food      = foodMatch ? parseInt(foodMatch[1]) : null;
+
+              const dimMatch = dimRaw.match(/"([^"]+)"$/);
+              const dim      = dimMatch ? dimMatch[1].replace('minecraft:', '').replace(/_/g, ' ') : '—';
+
+              let text = 'pos:    ' + pos + '\n';
+              text    += 'world:  ' + dim + '\n';
+              text    += 'health: ' + (hp !== null ? hp.toFixed(1) + ' / 20' : '—') + '\n';
+              text    += 'food:   ' + (food !== null ? food + ' / 20' : '—');
+              detail.textContent = text;
+
+              if (hpPct !== null) {
+                const bar  = el('div', { class: 'health-bar' });
+                const fill = el('div', { class: 'health-bar-fill' });
+                fill.style.width = hpPct + '%';
+                bar.appendChild(fill);
+                card.appendChild(bar);
+              }
+            } catch {
+              detail.textContent = 'could not fetch details';
+            }
+          }
+        } catch (err) {
+          plStatus.textContent = 'error: ' + err.message;
+        } finally {
+          plRefresh.disabled = false;
+          plRefresh.textContent = 'refresh';
+        }
+      }
+
+      if (server.running) loadPlayers();
+
+      /* ---- game log (logs/latest.log) ---- */
+      const glBody    = collapsible('game log', true);
+      glBody.appendChild(el('p', { class: 'muted' }, 'in-game events — joins, chat, deaths, commands. last 200 lines of logs/latest.log.'));
+      const glOut     = el('pre', { class: 'console', style: 'max-height: 400px;' }, 'loading...');
+      const glRefresh = el('button', { class: 'btn primary', onclick: () => loadGameLog() }, 'refresh');
+      glBody.appendChild(el('div', { class: 'row' }, [glRefresh]));
+      glBody.appendChild(glOut);
+
+      async function loadGameLog() {
+        glRefresh.disabled = true;
+        glRefresh.textContent = 'loading...';
+        try {
+          const r = await api('/api/servers/' + name + '/file?path=' + encodeURIComponent('logs/latest.log'));
+          const lines = r.content.split('\n');
+          glOut.textContent = lines.slice(-200).join('\n');
+          glOut.scrollTop = glOut.scrollHeight;
+        } catch (err) {
+          glOut.textContent = 'error: ' + err.message;
+        } finally {
+          glRefresh.disabled = false;
+          glRefresh.textContent = 'refresh';
+        }
+      }
+      loadGameLog();
+
+      /* ---- system log (journalctl) ---- */
+      const slBody     = collapsible('system log', true);
+      slBody.appendChild(el('p', { class: 'muted' }, 'recent output from journalctl. last 200 lines of the systemd unit log.'));
+      const slOut      = el('pre', { class: 'console', style: 'max-height: 400px;' }, 'loading...');
+      const slRefresh  = el('button', { class: 'btn primary', onclick: () => loadSysLog() }, 'refresh');
+      const slDownload = el('a', {
         class: 'btn',
         href: '/api/servers/' + encodeURIComponent(name) + '/logs/download',
       }, 'download full log');
+      slBody.appendChild(el('div', { class: 'row' }, [slRefresh, slDownload]));
+      slBody.appendChild(slOut);
 
-      main.appendChild(el('div', { class: 'row' }, [refreshBtn, downloadBtn]));
-      main.appendChild(logOut);
-
-      async function loadLogs() {
-        refreshBtn.disabled = true;
-        refreshBtn.textContent = 'loading...';
+      async function loadSysLog() {
+        slRefresh.disabled = true;
+        slRefresh.textContent = 'loading...';
         try {
           const r = await api('/api/servers/' + name + '/logs?lines=200');
-          logOut.textContent = r.text || '(no log entries)';
-          logOut.scrollTop = logOut.scrollHeight;
+          slOut.textContent = r.text || '(no log entries)';
+          slOut.scrollTop = slOut.scrollHeight;
         } catch (err) {
-          logOut.textContent = 'error: ' + err.message;
+          slOut.textContent = 'error: ' + err.message;
         } finally {
-          refreshBtn.disabled = false;
-          refreshBtn.textContent = 'refresh';
+          slRefresh.disabled = false;
+          slRefresh.textContent = 'refresh';
         }
       }
-      loadLogs();
+      loadSysLog();
 
-      /* ---------- files ---------- */
-      main.appendChild(el('h2', {}, 'files'));
-      main.appendChild(el('p', { class: 'muted' }, 'browse and edit text files inside the server folder.'));
-      main.appendChild(el('p', {}, el('a', { href: '/files.html?name=' + encodeURIComponent(name) }, 'open file browser →')));
+      /* ---- files ---- */
+      const fiBody = collapsible('files', true);
+      fiBody.appendChild(el('p', { class: 'muted' }, 'browse and edit text files inside the server folder.'));
+      fiBody.appendChild(el('p', {}, el('a', { href: '/files.html?name=' + encodeURIComponent(name) }, 'open file browser →')));
     }
   </script>
 </body>
