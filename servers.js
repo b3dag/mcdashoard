@@ -72,6 +72,42 @@ export async function getServerStatus(name) {
   return { running };
 }
 
+/* ---------- logs ----------
+   Both functions ask `journalctl --user` for output from the
+   server's systemd unit. getServerLogs returns a string for
+   inline display; streamServerLogs returns a stream that the
+   download endpoint pipes straight to the response. */
+
+export async function getServerLogs(name, lines = 200) {
+  const s = getServer(name);
+  if (!s) throw new Error('unknown server');
+
+  const r = await run('journalctl', [
+    '--user', '-u', s.systemd_unit,
+    '--no-pager', '--output=short-iso',
+    '-n', String(lines),
+  ]);
+  if (r.code !== 0) throw new Error(r.stderr || 'journalctl failed');
+  return r.stdout;
+}
+
+export function streamServerLogs(name) {
+  const s = getServer(name);
+  if (!s) throw new Error('unknown server');
+
+  /* spawn journalctl returning the entire unit log on stdout */
+  const p = spawn('journalctl', [
+    '--user', '-u', s.systemd_unit,
+    '--no-pager', '--output=short-iso',
+  ]);
+  p.stdin.end();
+  /* swallow stderr so it doesn't end up mixed into the download */
+  p.stderr.on('data', () => {});
+  return p.stdout;
+}
+
+/* ---------- RCON ---------- */
+
 export async function rconCommand(name, command) {
   const s = getServer(name);
   if (!s) throw new Error('unknown server');
@@ -92,6 +128,8 @@ export async function rconCommand(name, command) {
     await client.end().catch(() => {});
   }
 }
+
+/* ---------- sandboxed file access ---------- */
 
 function sandboxedPath(server, userPath) {
   const root = resolve(server.folder);

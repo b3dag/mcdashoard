@@ -119,6 +119,39 @@
         } catch (err) { cmdOut.textContent = 'error: ' + err.message + '\n\n' + cmdOut.textContent; }
       }
 
+      /* ---------- logs ---------- */
+      main.appendChild(el('h2', {}, 'logs'));
+      main.appendChild(el('p', { class: 'muted' },
+        'recent output from journalctl. shows the last 200 lines of the systemd unit log.'));
+
+      const logOut = el('pre', { class: 'console', style: 'max-height: 500px;' }, 'loading...');
+
+      const refreshBtn = el('button', { class: 'btn primary', onclick: () => loadLogs() }, 'refresh');
+      const downloadBtn = el('a', {
+        class: 'btn',
+        href: '/api/servers/' + encodeURIComponent(name) + '/logs/download',
+      }, 'download full log');
+
+      main.appendChild(el('div', { class: 'row' }, [refreshBtn, downloadBtn]));
+      main.appendChild(logOut);
+
+      async function loadLogs() {
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = 'loading...';
+        try {
+          const r = await api('/api/servers/' + name + '/logs?lines=200');
+          logOut.textContent = r.text || '(no log entries)';
+          logOut.scrollTop = logOut.scrollHeight;
+        } catch (err) {
+          logOut.textContent = 'error: ' + err.message;
+        } finally {
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = 'refresh';
+        }
+      }
+      loadLogs();
+
+      /* ---------- files ---------- */
       main.appendChild(el('h2', {}, 'files'));
       main.appendChild(el('p', { class: 'muted' }, 'browse and edit text files inside the server folder.'));
       main.appendChild(el('p', {}, el('a', { href: '/files.html?name=' + encodeURIComponent(name) }, 'open file browser →')));

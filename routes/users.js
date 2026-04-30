@@ -32,7 +32,7 @@ export default async function (app) {
   app.post('/api/users', { preHandler: requireSuper }, async (req, reply) => {
     const { username, password, is_super = false } = req.body || {};
     if (!USERNAME_RE.test(username || ''))                return reply.code(400).send({ error: 'invalid username' });
-    if (typeof password !== 'string' || password.length < 12) return reply.code(400).send({ error: 'password must be at least 12 chars' });
+    if (typeof password !== 'string' || password.length < 6) return reply.code(400).send({ error: 'password must be at least 6 chars' });
     if (stmts.getUserByUsername.get(username))            return reply.code(409).send({ error: 'username taken' });
 
     const hash = await hashPassword(password);
@@ -71,7 +71,7 @@ export default async function (app) {
     if (!target) return reply.code(404).send({ error: 'no such user' });
 
     const { password } = req.body || {};
-    if (typeof password !== 'string' || password.length < 12) return reply.code(400).send({ error: 'password must be at least 12 chars' });
+    if (typeof password !== 'string' || password.length < 6) return reply.code(400).send({ error: 'password must be at least 6 chars' });
     const hash = await hashPassword(password);
     stmts.updateUserPassword.run(hash, Date.now(), id);
     stmts.deleteUserSessions.run(id);

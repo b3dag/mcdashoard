@@ -67,8 +67,8 @@ export default async function (app) {
 
   app.post('/api/auth/change-password', { preHandler: requireAuth }, async (req, reply) => {
     const { current, next } = req.body || {};
-    if (typeof current !== 'string' || typeof next !== 'string' || next.length < 12) {
-      return reply.code(400).send({ error: 'new password must be at least 12 chars' });
+    if (typeof current !== 'string' || typeof next !== 'string' || next.length < 6) {
+      return reply.code(400).send({ error: 'new password must be at least 6 chars' });
     }
 
     const row = stmts.getUserById.get(req.user.id);

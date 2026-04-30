@@ -79,8 +79,8 @@ async function prompt(label, hide = false) {
   });
 }
 
-const pw1 = await prompt('password (min 12 chars): ', true);
-if (pw1.length < 12) {
+const pw1 = await prompt('password (min 6 chars): ', true);
+if (pw1.length < 6) {
   console.error('password too short');
   process.exit(1);
 }

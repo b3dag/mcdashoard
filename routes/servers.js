@@ -5,6 +5,7 @@ import {
   startServer, stopServer, restartServer, getServerStatus,
   rconCommand,
   listFiles, readServerFile, writeServerFile,
+  getServerLogs, streamServerLogs,
 } from '../servers.js';
 import { audit } from '../audit.js';
 import { requireAuth, requireRole } from '../roles.js';
@@ -82,6 +83,32 @@ export default async function (app) {
     const result = await rconCommand(req.params.name, command);
     audit(req, 'console.command', req.params.name, { command, result_preview: result.slice(0, 200) });
     return { result };
+  });
+
+  /* recent log lines for the server's systemd unit */
+  app.get('/api/servers/:name/logs', { preHandler: requireRole('operator') }, async (req, reply) => {
+    const lines = Math.min(parseInt(req.query.lines, 10) || 200, 2000);
+    try {
+      const text = await getServerLogs(req.params.name, lines);
+      return { lines, text };
+    } catch (e) {
+      return reply.code(500).send({ error: e.message });
+    }
+  });
+
+  /* download the full log as a text file */
+  app.get('/api/servers/:name/logs/download', { preHandler: requireRole('operator') }, async (req, reply) => {
+    const name = req.params.name;
+    if (!getServer(name)) return reply.code(404).send({ error: 'unknown server' });
+
+    audit(req, 'logs.download', name);
+
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    reply.header('Content-Type', 'text/plain; charset=utf-8');
+    reply.header('Content-Disposition', `attachment; filename="${name}-${stamp}.log"`);
+
+    const stream = streamServerLogs(name);
+    return reply.send(stream);
   });
 
   app.get('/api/servers/:name/files', { preHandler: requireRole('operator') }, async (req, reply) => {
