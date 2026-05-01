@@ -136,7 +136,7 @@
     ]));
     metricsBody.appendChild(metricsSummary);
 
-    function drawLineChart(canvas, values, color, unit) {
+    function drawLineChart(canvas, values, color, unit, fixedMax) {
       const ctx = canvas.getContext('2d');
       const dpr = window.devicePixelRatio || 1;
       const width = canvas.clientWidth * dpr;
@@ -152,28 +152,36 @@
       const valid = points.filter(v => v != null && Number.isFinite(v));
       
       if (!valid.length) {
-        ctx.fillStyle = 'var(--muted)';
+        ctx.fillStyle = '#e8e8e8'; // Bright text
         ctx.font = '12px ' + (window.getComputedStyle(canvas).fontFamily || 'monospace');
         ctx.fillText('no metrics available yet', 12, h / 2);
         return;
       }
       
-      let min = Math.min(...valid, 0);
-      let max = Math.max(...valid, 1);
-      if (max === min) max += 1; // Prevent division by zero
+      let min = 0; // Bottom is ALWAYS 0
+      let dataMax = Math.max(...valid, 0.1); 
+      let max = fixedMax;
+      
+      // If no fixedMax is provided (like Memory and Disk), calculate a clean, whole number
+      if (!max) {
+        let m = Math.ceil(dataMax);
+        // Force the maximum to be divisible by 4, so the 5 grid lines land on clean integers
+        while (m % 4 !== 0) m++;
+        max = m;
+      }
 
       const padding = 20;
-      const rightSpace = 65; // Space on the right for labels
+      const rightSpace = 55; // Space on the right for labels
 
       // Draw grid lines and labels
-      ctx.fillStyle = 'var(--muted)';
+      ctx.fillStyle = '#e8e8e8'; // Bright white text so you can read it
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)'; // faint grid lines
       ctx.lineWidth = 1;
-      ctx.font = '11px ' + (window.getComputedStyle(canvas).fontFamily || 'monospace');
+      ctx.font = '12px ' + (window.getComputedStyle(canvas).fontFamily || 'monospace');
       ctx.textAlign = 'right';
       ctx.textBaseline = 'middle';
 
-      const gridLines = 5; // number of horizontal lines (e.g. 0%, 25%, 50%, 75%, 100%)
+      const gridLines = 5; // 0%, 25%, 50%, 75%, 100% marks
       for (let i = 0; i < gridLines; i++) {
         const fraction = i / (gridLines - 1);
         const val = min + (max - min) * fraction;
@@ -185,8 +193,9 @@
         ctx.lineTo(w - rightSpace, y);
         ctx.stroke();
 
-        // Draw the text label
-        ctx.fillText(val.toFixed(1) + unit, w - 8, y);
+        // Draw the text label nicely formatted
+        let label = (val % 1 === 0) ? val.toString() : val.toFixed(1);
+        ctx.fillText(label + unit, w - 8, y);
       }
 
       // Draw the data line
@@ -256,8 +265,13 @@
 
         metricsStatus.textContent = '';
         const points = metrics.metrics || [];
-        drawLineChart(cpuCanvas, points.map(p => p.cpu), '#4caf50', '%');
-        drawLineChart(memCanvas, points.map(p => p.memory ? p.memory / 1024 / 1024 : null), '#42a5f5', ' MB');
+        // CPU passes '100' at the end to lock the maximum scale to 100%
+        drawLineChart(cpuCanvas, points.map(p => p.cpu), '#4caf50', '%', 100);
+        
+        // Memory is changed to GB (divided by 1024 three times)
+        drawLineChart(memCanvas, points.map(p => p.memory ? p.memory / 1024 / 1024 / 1024 : null), '#42a5f5', ' GB');
+        
+        // Disk stays the same
         drawLineChart(diskCanvas, points.map(p => p.disk ? p.disk / 1024 / 1024 / 1024 : null), '#f4b400', ' GB');
 
         const last = points[points.length - 1] || {};
