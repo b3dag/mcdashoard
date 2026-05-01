@@ -48,12 +48,31 @@ if (stmts.getUserByUsername.get(username)) {
   process.exit(1);
 }
 
-/* If stdin is a TTY use raw-mode hidden input.
-   Otherwise fall back to a plain readline (works when piped). */
+/* If stdin is a TTY → use raw-mode hidden input for each prompt.
+   Otherwise (piped) → read all of stdin once, split into lines,
+   and pull from the queue. readline.question() behaves badly when
+   stdin closes between prompts. */
 const isInteractive = stdin.isTTY === true;
 
+let pipedQueue = null;
+async function getPipedQueue() {
+  if (pipedQueue) return pipedQueue;
+  let data = '';
+  for await (const chunk of stdin) data += chunk;
+  pipedQueue = data.split('\n');
+  return pipedQueue;
+}
+
 async function prompt(label, hide = false) {
-  if (!hide || !isInteractive) {
+  if (!isInteractive) {
+    /* piped mode — show the label, return next queued line */
+    stdout.write(label);
+    const queue = await getPipedQueue();
+    const v = queue.shift() ?? '';
+    stdout.write('\n');
+    return v;
+  }
+  if (!hide) {
     const rl = readline.createInterface({ input: stdin, output: stdout });
     const v = await rl.question(label);
     rl.close();
@@ -93,6 +112,7 @@ if (pw1.length < 6) {
   process.exit(1);
 }
 const pw2 = await prompt('confirm password: ', true);
+
 if (pw1 !== pw2) {
   console.error('passwords do not match');
   process.exit(1);
