@@ -5,6 +5,31 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>files - brotalius dashboard</title>
   <link rel="stylesheet" href="/style.css" />
+  <style>
+    .file-actions {
+      display: flex;
+      gap: 0.4rem;
+      margin-left: auto;
+    }
+    .file-actions button {
+      font-size: 0.8rem;
+      padding: 0.2rem 0.5rem;
+    }
+    .upload-progress {
+      font-family: monospace;
+      font-size: 0.85rem;
+      color: var(--fg-muted, #888);
+      margin-top: 0.5rem;
+    }
+    .toolbar {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 1rem;
+    }
+    .toolbar input[type="file"] { display: none; }
+  </style>
 </head>
 <body>
   <main id="main"></main>
@@ -22,16 +47,36 @@
 
     const main = document.getElementById('main');
     main.appendChild(el('h1', {}, 'files'));
-    main.appendChild(el('p', { class: 'muted' },
+    main.appendChild(el('p', { class: 'muted' }, [
       el('a', { href: '/server.html?name=' + encodeURIComponent(name) }, '← back to server'),
-      ' · ' + name));
+      ' · ' + name,
+    ]));
 
     let cwd = '.';
 
     const breadcrumb = el('p', { class: 'muted mt-2' });
     main.appendChild(breadcrumb);
 
-    const listEl = el('div', { class: 'list mt-1' });
+    /* ---- toolbar ---- */
+    const toolbar = el('div', { class: 'toolbar' });
+    main.appendChild(toolbar);
+
+    const fileInput = el('input', { type: 'file' });
+    const uploadBtn = el('button', { class: 'btn primary', onclick: () => fileInput.click() }, 'upload file');
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length > 0) doUpload(fileInput.files[0]);
+    });
+
+    const newFolderBtn = el('button', { class: 'btn', onclick: doNewFolder }, 'new folder');
+
+    toolbar.appendChild(uploadBtn);
+    toolbar.appendChild(fileInput);
+    toolbar.appendChild(newFolderBtn);
+
+    const uploadStatus = el('div', { class: 'upload-progress' });
+    main.appendChild(uploadStatus);
+
+    const listEl = el('div', { class: 'list mt-2' });
     main.appendChild(listEl);
 
     const editor = el('div', { class: 'hidden mt-3' });
@@ -55,6 +100,7 @@
         el('span', { class: 'name' }, 'name'),
         el('span', {}, 'size'),
         el('span', {}, 'modified'),
+        el('span', {}, ''),
       ]));
 
       if (cwd !== '.') {
@@ -73,17 +119,108 @@
       }
 
       for (const it of res.items) {
-        const row = el('div', { class: 'list-row', style: 'cursor:pointer;' }, [
-          el('span', { class: 'name' }, (it.type === 'dir' ? '📁 ' : '📄 ') + it.name),
+        const fullPath = cwd === '.' ? it.name : cwd + '/' + it.name;
+
+        const nameSpan = el('span', { class: 'name', style: 'cursor:pointer;' },
+          (it.type === 'dir' ? '📁 ' : '📄 ') + it.name);
+        nameSpan.addEventListener('click', () => {
+          if (it.type === 'dir') { cwd = fullPath; refresh(); }
+          else if (it.type === 'file') { openFile(fullPath); }
+        });
+
+        const actions = el('div', { class: 'file-actions' });
+
+        if (it.type === 'file') {
+          actions.appendChild(el('a', {
+            class: 'btn',
+            href: '/api/servers/' + encodeURIComponent(name) + '/file/download?path=' + encodeURIComponent(fullPath),
+          }, 'download'));
+        }
+
+        const renameBtn = el('button', { class: 'btn', onclick: (e) => { e.stopPropagation(); doRename(it.name, fullPath); } }, 'rename');
+        const deleteBtn = el('button', { class: 'btn danger', onclick: (e) => { e.stopPropagation(); doDelete(it.name, fullPath, it.type); } }, 'delete');
+        actions.appendChild(renameBtn);
+        actions.appendChild(deleteBtn);
+
+        const row = el('div', { class: 'list-row' }, [
+          nameSpan,
           el('span', { class: 'muted' }, it.type === 'file' ? formatSize(it.size) : ''),
           el('span', { class: 'muted' }, fmtDate(it.mtime)),
+          actions,
         ]);
-        row.addEventListener('click', () => {
-          const next = cwd === '.' ? it.name : cwd + '/' + it.name;
-          if (it.type === 'dir') { cwd = next; refresh(); }
-          else if (it.type === 'file') { openFile(next); }
-        });
         listEl.appendChild(row);
+      }
+    }
+
+    async function doUpload(file) {
+      const MAX = 200 * 1024 * 1024;
+      if (file.size > MAX) {
+        uploadStatus.textContent = 'file too large (max 200 MB)';
+        return;
+      }
+
+      uploadStatus.textContent = 'uploading ' + file.name + ' (' + formatSize(file.size) + ')...';
+      uploadBtn.disabled = true;
+
+      const fd = new FormData();
+      fd.append('file', file);
+
+      try {
+        const r = await fetch('/api/servers/' + encodeURIComponent(name) + '/upload?path=' + encodeURIComponent(cwd), {
+          method: 'POST',
+          body: fd,
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'upload failed');
+        uploadStatus.textContent = 'uploaded ' + data.filename + ' (' + formatSize(data.bytes) + ')';
+        setTimeout(() => { uploadStatus.textContent = ''; }, 3000);
+        fileInput.value = '';
+        await refresh();
+      } catch (err) {
+        uploadStatus.textContent = 'error: ' + err.message;
+      } finally {
+        uploadBtn.disabled = false;
+      }
+    }
+
+    async function doNewFolder() {
+      const folderName = prompt('new folder name:');
+      if (!folderName) return;
+      try {
+        await api('/api/servers/' + name + '/mkdir', {
+          method: 'POST',
+          body: { path: cwd, name: folderName },
+        });
+        await refresh();
+      } catch (err) {
+        alert('could not create folder: ' + err.message);
+      }
+    }
+
+    async function doRename(oldName, fullPath) {
+      const newName = prompt('rename "' + oldName + '" to:', oldName);
+      if (!newName || newName === oldName) return;
+      try {
+        await api('/api/servers/' + name + '/rename', {
+          method: 'POST',
+          body: { from: fullPath, to: newName },
+        });
+        await refresh();
+      } catch (err) {
+        alert('could not rename: ' + err.message);
+      }
+    }
+
+    async function doDelete(displayName, fullPath, type) {
+      const what = type === 'dir' ? 'folder (and all its contents)' : 'file';
+      if (!confirm('delete ' + what + ' "' + displayName + '"? this cannot be undone.')) return;
+      try {
+        await api('/api/servers/' + name + '/entry?path=' + encodeURIComponent(fullPath), {
+          method: 'DELETE',
+        });
+        await refresh();
+      } catch (err) {
+        alert('could not delete: ' + err.message);
       }
     }
 
@@ -137,7 +274,8 @@
     function formatSize(bytes) {
       if (bytes < 1024) return bytes + ' B';
       if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-      return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+      if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+      return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
     }
   </script>
 </body>

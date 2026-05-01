@@ -4,6 +4,7 @@
    Listens on 127.0.0.1 only. Cloudflare Tunnel forwards to it.
    Includes:
      - cookie auth + session
+     - multipart support for file uploads
      - api routes for auth / servers / users
      - optional proxy to a local ttyd at 127.0.0.1:7681 (super-only)
      - static dashboard pages from /public
@@ -19,11 +20,12 @@ import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import staticFiles from '@fastify/static';
 import httpProxy from '@fastify/http-proxy';
+import multipart from '@fastify/multipart';
 
 import { loadUserFromCookie } from './auth.js';
 
 import authRoutes from './routes/auth.js';
-import serverRoutes from './routes/servers.js';
+import serverRoutes, { MAX_UPLOAD_BYTES } from './routes/servers.js';
 import userRoutes from './routes/users.js';
 
 import { startAutoStop } from './auto-stop.js';
@@ -52,11 +54,19 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = Fastify({
   logger: { level: process.env.LOG_LEVEL || 'info' },
   trustProxy: process.env.TRUST_PROXY === 'true',
+  bodyLimit: 10 * 1024 * 1024, /* 10MB for non-upload bodies */
 });
 
 await app.register(cookie, {
   secret: process.env.SESSION_SECRET,
   parseOptions: {},
+});
+
+await app.register(multipart, {
+  limits: {
+    fileSize: MAX_UPLOAD_BYTES,
+    files:    1,
+  },
 });
 
 /* populate req.user on every request */
@@ -70,8 +80,6 @@ await app.register(serverRoutes);
 await app.register(userRoutes);
 
 /* ---------- terminal proxy (super-operator only) ---------- */
-/* Only registered if TERMINAL_ENABLED=true. ttyd must be running
-   on 127.0.0.1:7681 with --writable. */
 if (process.env.TERMINAL_ENABLED === 'true') {
   await app.register(httpProxy, {
     upstream: 'http://127.0.0.1:7681',
@@ -92,8 +100,6 @@ await app.register(staticFiles, {
   prefix: '/',
 });
 
-/* SPA-ish fallback: any non-API GET that isn't a file → /login.html if not logged in,
-   otherwise /index.html. */
 app.setNotFoundHandler(async (req, reply) => {
   if (req.method !== 'GET' || req.url.startsWith('/api/')) {
     return reply.code(404).send({ error: 'not found' });

@@ -2,8 +2,9 @@
    servers.js — registry + actions for Minecraft servers.
    ========================================================= */
 
-import { readFile, writeFile, readdir, stat } from 'node:fs/promises';
-import { resolve, relative, isAbsolute, join, sep } from 'node:path';
+import { readFile, writeFile, readdir, stat, mkdir, rename, rm } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { resolve, relative, isAbsolute, join, sep, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { Rcon } from 'rcon-client';
 
@@ -125,12 +126,9 @@ export async function rconCommand(name, command) {
   }
 }
 
-/* Number of online players via RCON `list`. Returns null if it
-   couldn't be determined (RCON failed, server not running, etc.) */
 export async function getOnlinePlayerCount(name) {
   try {
     const result = await rconCommand(name, 'list');
-    /* "There are 2 of a max of 20 players online: ..." */
     const m = result.match(/There are\s+(\d+)\s+of/i);
     if (!m) return null;
     return parseInt(m[1], 10);
@@ -160,7 +158,7 @@ function sandboxedPath(server, userPath) {
 
   if (typeof userPath !== 'string' || userPath.length === 0) throw new Error('invalid path');
   if (isAbsolute(userPath))                                 throw new Error('absolute paths not allowed');
-  if (userPath.includes('\0'))                               throw new Error('null byte in path');
+  if (userPath.includes('\0'))                              throw new Error('null byte in path');
 
   const full = resolve(root, userPath);
   const rel  = relative(root, full);
@@ -168,6 +166,16 @@ function sandboxedPath(server, userPath) {
     throw new Error('path escapes server folder');
   }
   return full;
+}
+
+/* file/folder name validation — for create / rename. Avoid path
+   separators in the name itself. */
+function validateEntryName(n) {
+  if (typeof n !== 'string' || n.length === 0)         throw new Error('name required');
+  if (n.length > 255)                                  throw new Error('name too long');
+  if (n.includes('/') || n.includes('\\'))             throw new Error('name cannot contain slashes');
+  if (n === '.' || n === '..')                         throw new Error('invalid name');
+  if (n.includes('\0'))                                throw new Error('null byte in name');
 }
 
 export async function listFiles(name, subPath = '.') {
@@ -217,4 +225,117 @@ export async function writeServerFile(name, subPath, content) {
 
   const full = sandboxedPath(s, subPath);
   await writeFile(full, content, 'utf8');
+}
+
+/* ---------- file operations: download, upload, mkdir, rename, delete ---------- */
+
+/* Returns { stream, size, name } for downloading a file. Caller pipes
+   the stream to the response. */
+export async function downloadServerFile(name, subPath) {
+  const s = getServer(name);
+  if (!s) throw new Error('unknown server');
+
+  const full = sandboxedPath(s, subPath);
+  const st   = await stat(full);
+  if (!st.isFile()) throw new Error('not a regular file');
+
+  return {
+    stream: createReadStream(full),
+    size:   st.size,
+    name:   subPath.split('/').pop(),
+  };
+}
+
+/* Save an upload stream to the given folder. The destination is
+   <folder>/<filename>. Filename comes from the multipart upload and
+   gets validated. Returns total bytes written.
+   Errors with "file too large" if maxBytes is exceeded. */
+export async function uploadServerFile(name, folderPath, filename, dataStream, maxBytes) {
+  const s = getServer(name);
+  if (!s) throw new Error('unknown server');
+
+  validateEntryName(filename);
+
+  const folderFull = sandboxedPath(s, folderPath || '.');
+  const folderStat = await stat(folderFull);
+  if (!folderStat.isDirectory()) throw new Error('target is not a folder');
+
+  const dest = join(folderFull, filename);
+
+  /* sanity check: dest must still be inside the server folder
+     (validateEntryName already prevents the worst cases) */
+  const destRel = relative(resolve(s.folder), dest);
+  if (destRel.startsWith('..') || isAbsolute(destRel)) {
+    throw new Error('destination escapes server folder');
+  }
+
+  return new Promise((resolveP, rejectP) => {
+    let written = 0;
+    const out = createWriteStream(dest);
+    let errored = false;
+
+    dataStream.on('data', (chunk) => {
+      written += chunk.length;
+      if (written > maxBytes) {
+        errored = true;
+        out.destroy();
+        dataStream.destroy?.();
+        rm(dest, { force: true }).catch(() => {});
+        rejectP(new Error('file too large'));
+      }
+    });
+    dataStream.on('error', (e) => { errored = true; rejectP(e); });
+    out.on('error', (e) => { errored = true; rejectP(e); });
+    out.on('finish', () => { if (!errored) resolveP({ bytes: written }); });
+
+    dataStream.pipe(out);
+  });
+}
+
+export async function createFolder(name, parentPath, folderName) {
+  const s = getServer(name);
+  if (!s) throw new Error('unknown server');
+
+  validateEntryName(folderName);
+  const parent = sandboxedPath(s, parentPath || '.');
+  const parentStat = await stat(parent);
+  if (!parentStat.isDirectory()) throw new Error('parent is not a folder');
+
+  const target = join(parent, folderName);
+  /* re-sandbox the target to be safe */
+  const rel = relative(resolve(s.folder), target);
+  if (rel.startsWith('..') || isAbsolute(rel)) throw new Error('escapes server folder');
+
+  await mkdir(target, { recursive: false });
+}
+
+export async function renameServerEntry(name, fromPath, toName) {
+  const s = getServer(name);
+  if (!s) throw new Error('unknown server');
+
+  validateEntryName(toName);
+
+  const fromFull = sandboxedPath(s, fromPath);
+  const parent   = dirname(fromFull);
+  const toFull   = join(parent, toName);
+
+  /* keep target inside server folder */
+  const rel = relative(resolve(s.folder), toFull);
+  if (rel.startsWith('..') || isAbsolute(rel)) throw new Error('target escapes server folder');
+
+  await rename(fromFull, toFull);
+}
+
+export async function deleteServerEntry(name, subPath) {
+  const s = getServer(name);
+  if (!s) throw new Error('unknown server');
+
+  /* never delete the server root itself */
+  if (subPath === '.' || subPath === '' || subPath === '/') {
+    throw new Error('cannot delete server root');
+  }
+
+  const full = sandboxedPath(s, subPath);
+  /* rm with recursive + force handles both files and folders, missing or not */
+  await rm(full, { recursive: true, force: true });
 }

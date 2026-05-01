@@ -25,7 +25,10 @@ Login-protected, role-based, with audit logging, an in-browser terminal, and no 
 - Start, stop, and restart Minecraft servers from a web page
 - Manage whitelist entries via RCON
 - Send arbitrary console commands via RCON
-- Browse and edit text files inside each server's folder (sandboxed)
+- View **live online players** with position, world, health and food bars
+- View **in-game logs** (joins, chat, deaths) and **systemd logs** with download
+- **Auto-stop** idle servers after a configurable duration with no players online
+- **Full file browser**: upload, download (any file type), edit text files, create folders, rename, delete
 - Manage dashboard users with per-server roles
 - Open a real bash shell in your browser (super-operators only)
 - Log every state change to an audit table
@@ -540,6 +543,8 @@ npm install           # picks up dependency changes
 systemctl --user restart dashboard
 ```
 
+> **Important:** always run `npm install` after pulling. New features may add new dependencies (e.g. `@fastify/multipart` for file uploads), and the dashboard will fail to start without them.
+
 The SQLite database is preserved across restarts — users, sessions, audit log all survive.
 
 ## Backups
@@ -662,7 +667,6 @@ Things you might want to add later:
 
 - 2FA (TOTP) for login
 - Live log streaming (Server-Sent Events tailing `journalctl -fu mc-<name>`)
-- File uploads (e.g. replacing jars or uploading mods)
 - Email-based password reset
 - Automated backups
 
