@@ -66,7 +66,7 @@
     }
     .chart-panel canvas {
       width: 100%;
-      height: 140px;
+      height: 250px;
       background: #050505;
       border: 1px solid var(--border);
       display: block;
@@ -125,9 +125,9 @@
     metricsBody.appendChild(el('p', { class: 'muted' }, 'server resource usage and uptime. updates every 15 seconds.'));
     const metricsStatus = el('div', { class: 'muted' }, 'loading metrics...');
     const metricsSummary = el('div', { class: 'metrics-summary' }, '');
-    const cpuCanvas = el('canvas', { width: '600', height: '140' });
-    const memCanvas = el('canvas', { width: '600', height: '140' });
-    const diskCanvas = el('canvas', { width: '600', height: '140' });
+    const cpuCanvas = el('canvas', { width: '600', height: '250' });
+    const memCanvas = el('canvas', { width: '600', height: '250' });
+    const diskCanvas = el('canvas', { width: '600', height: '250' });
     metricsBody.appendChild(metricsStatus);
     metricsBody.appendChild(el('div', { class: 'chart-grid' }, [
       el('div', { class: 'chart-panel' }, [el('h3', {}, 'CPU usage'), cpuCanvas]),
@@ -147,29 +147,61 @@
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
       ctx.clearRect(0, 0, w, h);
+      
       const points = values.map(v => (v == null ? null : Number(v)));
       const valid = points.filter(v => v != null && Number.isFinite(v));
+      
       if (!valid.length) {
         ctx.fillStyle = 'var(--muted)';
         ctx.font = '12px ' + (window.getComputedStyle(canvas).fontFamily || 'monospace');
         ctx.fillText('no metrics available yet', 12, h / 2);
         return;
       }
-      const min = Math.min(...valid, 0);
-      const max = Math.max(...valid, 1);
-      const padding = 12;
+      
+      let min = Math.min(...valid, 0);
+      let max = Math.max(...valid, 1);
+      if (max === min) max += 1; // Prevent division by zero
+
+      const padding = 20;
+      const rightSpace = 65; // Space on the right for labels
+
+      // Draw grid lines and labels
+      ctx.fillStyle = 'var(--muted)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)'; // faint grid lines
+      ctx.lineWidth = 1;
+      ctx.font = '11px ' + (window.getComputedStyle(canvas).fontFamily || 'monospace');
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+
+      const gridLines = 5; // number of horizontal lines (e.g. 0%, 25%, 50%, 75%, 100%)
+      for (let i = 0; i < gridLines; i++) {
+        const fraction = i / (gridLines - 1);
+        const val = min + (max - min) * fraction;
+        const y = h - padding - fraction * (h - padding * 2);
+        
+        // Draw the horizontal grid line
+        ctx.beginPath();
+        ctx.moveTo(padding, y);
+        ctx.lineTo(w - rightSpace, y);
+        ctx.stroke();
+
+        // Draw the text label
+        ctx.fillText(val.toFixed(1) + unit, w - 8, y);
+      }
+
+      // Draw the data line
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.beginPath();
       let first = true;
       for (let i = 0; i < points.length; i++) {
         const value = points[i];
-        const x = padding + (i / Math.max(1, points.length - 1)) * (w - padding * 2);
+        const x = padding + (i / Math.max(1, points.length - 1)) * (w - padding - rightSpace);
         if (value == null) {
           first = true;
           continue;
         }
-        const y = h - padding - ((value - min) / Math.max(0.0001, max - min)) * (h - padding * 2);
+        const y = h - padding - ((value - min) / (max - min)) * (h - padding * 2);
         if (first) {
           ctx.moveTo(x, y);
           first = false;
@@ -178,20 +210,18 @@
         }
       }
       ctx.stroke();
+
+      // Draw the data points
       ctx.fillStyle = color;
       for (let i = 0; i < points.length; i++) {
         const value = points[i];
         if (value == null) continue;
-        const x = padding + (i / Math.max(1, points.length - 1)) * (w - padding * 2);
-        const y = h - padding - ((value - min) / Math.max(0.0001, max - min)) * (h - padding * 2);
+        const x = padding + (i / Math.max(1, points.length - 1)) * (w - padding - rightSpace);
+        const y = h - padding - ((value - min) / (max - min)) * (h - padding * 2);
         ctx.beginPath();
         ctx.arc(x, y, 3, 0, Math.PI * 2);
         ctx.fill();
       }
-      ctx.fillStyle = 'var(--muted)';
-      ctx.font = '12px ' + (window.getComputedStyle(canvas).fontFamily || 'monospace');
-      ctx.fillText((max || 0).toFixed(1) + unit, w - padding - 42, padding + 10);
-      ctx.fillText((min || 0).toFixed(1) + unit, w - padding - 42, h - padding);
     }
 
     function formatBytes(bytes) {

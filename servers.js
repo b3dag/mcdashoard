@@ -36,7 +36,7 @@ export function getServer(name) {
 
 const METRIC_SAMPLES = new Map();
 const METRIC_LAST = new Map();
-const MAX_METRIC_POINTS = 96;
+const MAX_METRIC_POINTS = 30;
 const METRIC_SAMPLE_INTERVAL_MS = 15000;
 
 function run(cmd, args) {
