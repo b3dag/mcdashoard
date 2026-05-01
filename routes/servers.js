@@ -126,7 +126,14 @@ export default async function (app) {
     const command = (req.body?.command || '').trim();
     if (!command || command.length > 1000) return reply.code(400).send({ error: 'invalid command' });
     const result = await rconCommand(req.params.name, command);
-    audit(req, 'console.command', req.params.name, { command, result_preview: result.slice(0, 200) });
+    
+    // Ignore background polling commands used by the frontend UI
+    const isPolling = /^list$|^data get entity [a-zA-Z0-9_]+ (Pos|Health|foodLevel|Dimension)$/i.test(command);
+    
+    if (!isPolling) {
+      audit(req, 'console.command', req.params.name, { command, result_preview: result.slice(0, 200) });
+    }
+    
     return { result };
   });
 
