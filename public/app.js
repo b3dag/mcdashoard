@@ -58,7 +58,7 @@ export async function renderHeader(active) {
   ]);
 
   const header = el('header', {}, [
-    el('span', { class: 'logo' }, 'brotalius dashboard'),
+    el('span', { class: 'logo' }, 'minecraft dashboard'),
     nav,
     el('span', { class: 'who' }, [
       me.username,
@@ -72,7 +72,7 @@ export async function renderHeader(active) {
 
 export function renderFooter() {
   document.body.appendChild(
-    el('footer', {}, 'brotalius dashboard · keep an eye on the audit log')
+    el('footer', {}, 'minecraft dashboard - made by brotlaius')
   );
 }
 
