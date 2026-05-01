@@ -11,6 +11,10 @@ import {
   getAutoStopMinutes, setAutoStopMinutes,
   getOnlinePlayerCount,
 } from '../servers.js';
+import {
+  listWorldFolders, downloadWorldZip, uploadAndReplaceWorld,
+  listGameLogs, readGameLog, downloadAllGameLogs,
+} from '../world.js';
 import { getEmptySince } from '../auto-stop.js';
 import { audit } from '../audit.js';
 import { requireAuth, requireRole } from '../roles.js';
@@ -18,14 +22,30 @@ import { requireAuth, requireRole } from '../roles.js';
 const MC_USERNAME = /^[a-zA-Z0-9_]{3,16}$/;
 const ALLOWED_AUTO_STOP = [0, 5, 15, 30, 60, 120];
 
-/* size limit applied to uploads. The fastify multipart plugin also
-   enforces this; we keep them in sync. */
-export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = Infinity;
 
 function visibleServers(user) {
   const all = listServers();
   if (user.is_super) return all;
   return all.filter(s => user.permissions[s.name]);
+}
+
+function requireServerStopped(req, reply) {
+  const name = req.params.name;
+  return getServerStatus(name)
+    .then((status) => {
+      if (status.running) {
+        reply.code(409).send({
+          error: 'server is running',
+          detail: 'this operation requires the server to be stopped first',
+        });
+        return reply;
+      }
+    })
+    .catch(() => {
+      reply.code(500).send({ error: 'could not check server status' });
+      return reply;
+    });
 }
 
 export default async function (app) {
@@ -95,7 +115,6 @@ export default async function (app) {
     return { result };
   });
 
-  /* recent log lines for the server's systemd unit */
   app.get('/api/servers/:name/logs', { preHandler: requireRole('operator') }, async (req, reply) => {
     const lines = Math.min(parseInt(req.query.lines, 10) || 200, 2000);
     try {
@@ -106,7 +125,6 @@ export default async function (app) {
     }
   });
 
-  /* download the full systemd log as a text file */
   app.get('/api/servers/:name/logs/download', { preHandler: requireRole('operator') }, async (req, reply) => {
     const name = req.params.name;
     if (!getServer(name)) return reply.code(404).send({ error: 'unknown server' });
@@ -121,7 +139,31 @@ export default async function (app) {
     return reply.send(stream);
   });
 
-  /* download the in-game log file (logs/latest.log) */
+  /* ---- game logs ---- */
+
+  /* list all archived + current game log files */
+  app.get('/api/servers/:name/game-log/files', { preHandler: requireRole('operator') }, async (req, reply) => {
+    try {
+      const files = await listGameLogs(req.params.name);
+      return { files };
+    } catch (e) {
+      return reply.code(400).send({ error: e.message });
+    }
+  });
+
+  /* read one log (decompresses .gz) */
+  app.get('/api/servers/:name/game-log/file', { preHandler: requireRole('operator') }, async (req, reply) => {
+    const file = req.query.name;
+    if (!file) return reply.code(400).send({ error: 'name required' });
+    try {
+      const text = await readGameLog(req.params.name, file);
+      return { name: file, content: text };
+    } catch (e) {
+      return reply.code(404).send({ error: e.message });
+    }
+  });
+
+  /* download just the current latest.log as text (kept for backwards compat) */
   app.get('/api/servers/:name/game-log/download', { preHandler: requireRole('operator') }, async (req, reply) => {
     const name = req.params.name;
     if (!getServer(name)) return reply.code(404).send({ error: 'unknown server' });
@@ -139,7 +181,24 @@ export default async function (app) {
     }
   });
 
-  /* auto-stop config */
+  /* download every log file in the logs/ folder as a zip */
+  app.get('/api/servers/:name/game-log/download-all', { preHandler: requireRole('operator') }, async (req, reply) => {
+    const name = req.params.name;
+    if (!getServer(name)) return reply.code(404).send({ error: 'unknown server' });
+
+    try {
+      audit(req, 'game-log.download-all', name);
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      reply.header('Content-Type', 'application/zip');
+      reply.header('Content-Disposition', `attachment; filename="${name}-all-logs-${stamp}.zip"`);
+      const stream = downloadAllGameLogs(name);
+      return reply.send(stream);
+    } catch (e) {
+      return reply.code(400).send({ error: e.message });
+    }
+  });
+
+  /* ---- auto-stop ---- */
   app.get('/api/servers/:name/auto-stop', { preHandler: requireRole('operator') }, async (req, reply) => {
     if (!getServer(req.params.name)) return reply.code(404).send({ error: 'unknown server' });
     return { minutes: getAutoStopMinutes(req.params.name) };
@@ -206,19 +265,6 @@ export default async function (app) {
     }
   });
 
-  app.put('/api/servers/:name/file', { preHandler: requireRole('operator') }, async (req, reply) => {
-    const { path, content } = req.body || {};
-    if (!path || typeof content !== 'string') return reply.code(400).send({ error: 'path and content required' });
-    try {
-      await writeServerFile(req.params.name, path, content);
-      audit(req, 'file.write', req.params.name, { path, bytes: Buffer.byteLength(content) });
-      return { ok: true };
-    } catch (e) {
-      return reply.code(400).send({ error: e.message });
-    }
-  });
-
-  /* download any file as raw bytes */
   app.get('/api/servers/:name/file/download', { preHandler: requireRole('operator') }, async (req, reply) => {
     const path = req.query.path;
     if (!path) return reply.code(400).send({ error: 'path required' });
@@ -235,9 +281,23 @@ export default async function (app) {
     }
   });
 
-  /* upload via multipart form. The form field name must be "file";
-     the target folder comes from query string ?path=... */
-  app.post('/api/servers/:name/upload', { preHandler: requireRole('operator') }, async (req, reply) => {
+  app.put('/api/servers/:name/file', {
+    preHandler: [requireRole('operator'), requireServerStopped],
+  }, async (req, reply) => {
+    const { path, content } = req.body || {};
+    if (!path || typeof content !== 'string') return reply.code(400).send({ error: 'path and content required' });
+    try {
+      await writeServerFile(req.params.name, path, content);
+      audit(req, 'file.write', req.params.name, { path, bytes: Buffer.byteLength(content) });
+      return { ok: true };
+    } catch (e) {
+      return reply.code(400).send({ error: e.message });
+    }
+  });
+
+  app.post('/api/servers/:name/upload', {
+    preHandler: [requireRole('operator'), requireServerStopped],
+  }, async (req, reply) => {
     if (!req.isMultipart()) return reply.code(400).send({ error: 'expected multipart upload' });
 
     const folder = req.query.path || '.';
@@ -245,7 +305,6 @@ export default async function (app) {
     let filename = null;
 
     try {
-      /* @fastify/multipart streams parts. Take the first file part. */
       const parts = req.parts();
       for await (const part of parts) {
         if (part.type === 'file') {
@@ -265,7 +324,9 @@ export default async function (app) {
     }
   });
 
-  app.post('/api/servers/:name/mkdir', { preHandler: requireRole('operator') }, async (req, reply) => {
+  app.post('/api/servers/:name/mkdir', {
+    preHandler: [requireRole('operator'), requireServerStopped],
+  }, async (req, reply) => {
     const { path: parent, name: folderName } = req.body || {};
     if (typeof folderName !== 'string') return reply.code(400).send({ error: 'name required' });
     try {
@@ -277,7 +338,9 @@ export default async function (app) {
     }
   });
 
-  app.post('/api/servers/:name/rename', { preHandler: requireRole('operator') }, async (req, reply) => {
+  app.post('/api/servers/:name/rename', {
+    preHandler: [requireRole('operator'), requireServerStopped],
+  }, async (req, reply) => {
     const { from, to } = req.body || {};
     if (typeof from !== 'string' || typeof to !== 'string') return reply.code(400).send({ error: 'from and to required' });
     try {
@@ -289,13 +352,63 @@ export default async function (app) {
     }
   });
 
-  app.delete('/api/servers/:name/entry', { preHandler: requireRole('operator') }, async (req, reply) => {
+  app.delete('/api/servers/:name/entry', {
+    preHandler: [requireRole('operator'), requireServerStopped],
+  }, async (req, reply) => {
     const path = req.query.path;
     if (!path) return reply.code(400).send({ error: 'path required' });
     try {
       await deleteServerEntry(req.params.name, path);
       audit(req, 'entry.delete', req.params.name, { path });
       return { ok: true };
+    } catch (e) {
+      return reply.code(400).send({ error: e.message });
+    }
+  });
+
+  /* ---------- world zip download / upload ---------- */
+
+  app.get('/api/servers/:name/world/folders', { preHandler: requireRole('operator') }, async (req, reply) => {
+    try {
+      const folders = await listWorldFolders(req.params.name);
+      return { folders };
+    } catch (e) {
+      return reply.code(400).send({ error: e.message });
+    }
+  });
+
+  app.get('/api/servers/:name/world/download', { preHandler: requireRole('operator') }, async (req, reply) => {
+    const folder = req.query.folder || 'world';
+    if (!getServer(req.params.name)) return reply.code(404).send({ error: 'unknown server' });
+
+    try {
+      audit(req, 'world.download', req.params.name, { folder });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      reply.header('Content-Type', 'application/zip');
+      reply.header('Content-Disposition', `attachment; filename="${req.params.name}-${folder}-${stamp}.zip"`);
+      const stream = downloadWorldZip(req.params.name, folder);
+      return reply.send(stream);
+    } catch (e) {
+      return reply.code(400).send({ error: e.message });
+    }
+  });
+
+  app.post('/api/servers/:name/world/upload', {
+    preHandler: [requireRole('operator'), requireServerStopped],
+  }, async (req, reply) => {
+    if (!req.isMultipart()) return reply.code(400).send({ error: 'expected multipart upload' });
+    const folder = req.query.folder || 'world';
+
+    try {
+      const parts = req.parts();
+      for await (const part of parts) {
+        if (part.type === 'file') {
+          const r = await uploadAndReplaceWorld(req.params.name, folder, part.file);
+          audit(req, 'world.upload', req.params.name, { folder, entries: r.entries, bytes: r.bytes });
+          return { ok: true, folder, entries: r.entries, bytes: r.bytes };
+        }
+      }
+      return reply.code(400).send({ error: 'no file in upload' });
     } catch (e) {
       return reply.code(400).send({ error: e.message });
     }

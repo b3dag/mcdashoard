@@ -7,11 +7,8 @@
   <link rel="stylesheet" href="/style.css" />
   <style>
     .collapsible-header {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      cursor: pointer;
-      user-select: none;
+      display: flex; align-items: center; gap: 0.5rem;
+      cursor: pointer; user-select: none;
     }
     .collapsible-header h2 { margin: 0; }
     .collapse-arrow {
@@ -32,21 +29,25 @@
       border: 1px solid var(--border, #333);
       border-radius: 6px;
       padding: 0.75rem 1rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
+      display: flex; flex-direction: column; gap: 0.25rem;
     }
     .player-name { font-weight: bold; font-size: 1rem; }
     .player-detail { font-size: 0.85rem; color: var(--fg-muted, #888); font-family: monospace; white-space: pre; }
     .mc-bar { display: flex; gap: 2px; margin-top: 0.3rem; align-items: center; }
-    .mc-pip {
-      width: 10px; height: 10px;
-      border-radius: 2px;
-      flex-shrink: 0;
-    }
+    .mc-pip { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
     .mc-pip.full  { opacity: 1; }
     .mc-pip.half  { opacity: 1; position: relative; overflow: hidden; background: transparent !important; }
     .mc-pip.empty { opacity: 0.18; }
+
+    .running-warn {
+      border: 1px solid #aa5050;
+      background: #2a1010;
+      color: #ffaaaa;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      margin: 0.5rem 0;
+      font-size: 0.85rem;
+    }
   </style>
 </head>
 <body>
@@ -110,7 +111,6 @@
       }, label);
     }
 
-    /* ---- collapsible section helper ---- */
     function collapsible(title, startCollapsed = false) {
       const arrow  = el('span', { class: 'collapse-arrow' }, '▼');
       const header = el('div', { class: 'collapsible-header' + (startCollapsed ? ' collapsed' : '') }, [
@@ -118,8 +118,8 @@
       ]);
       const body = el('div', { class: 'collapsible-body' + (startCollapsed ? ' collapsed' : '') });
       header.addEventListener('click', () => {
-        const nowCollapsed = header.classList.toggle('collapsed');
-        body.classList.toggle('collapsed', nowCollapsed);
+        const c = header.classList.toggle('collapsed');
+        body.classList.toggle('collapsed', c);
       });
       main.appendChild(el('div', { class: 'mt-2' }, [header, body]));
       return body;
@@ -243,9 +243,7 @@
               const dimMatch = dimRaw.match(/"([^"]+)"$/);
               const dim      = dimMatch ? dimMatch[1].replace('minecraft:', '').replace(/_/g, ' ') : '—';
 
-              let text = 'pos:    ' + pos + '\n';
-              text    += 'world:  ' + dim;
-              detail.textContent = text;
+              detail.textContent = 'pos:    ' + pos + '\nworld:  ' + dim;
 
               function makePip(state, color) {
                 const pip = el('div', { class: 'mc-pip ' + state });
@@ -262,12 +260,12 @@
               function makeBar(value, color) {
                 const bar = el('div', { class: 'mc-bar' });
                 for (let i = 0; i < 10; i++) {
-                  const threshold = (i + 1) * 2;
-                  let state;
-                  if (value >= threshold)          state = 'full';
-                  else if (value >= threshold - 1) state = 'half';
-                  else                             state = 'empty';
-                  bar.appendChild(makePip(state, color));
+                  const t = (i + 1) * 2;
+                  let s;
+                  if (value >= t)        s = 'full';
+                  else if (value >= t-1) s = 'half';
+                  else                   s = 'empty';
+                  bar.appendChild(makePip(s, color));
                 }
                 return bar;
               }
@@ -297,8 +295,7 @@
       /* ---- auto-stop ---- */
       const asBody = collapsible('auto-stop', true);
       asBody.appendChild(el('p', { class: 'muted' },
-        'automatically stop the server when no players are online for the chosen duration. ' +
-        'checked once per minute.'));
+        'automatically stop the server when no players are online for the chosen duration. checked once per minute.'));
       const asSelect = el('select', {}, [
         el('option', { value: '0'   }, 'off (never auto-stop)'),
         el('option', { value: '5'   }, '5 minutes'),
@@ -309,7 +306,6 @@
       ]);
       const asStatus = el('span', { class: 'muted' }, 'loading...');
       asBody.appendChild(el('div', { class: 'row' }, [asSelect, asStatus]));
-
       const asLive = el('p', { class: 'muted', style: 'margin-top:0.75rem;font-family:monospace;' }, '—');
       asBody.appendChild(asLive);
 
@@ -317,18 +313,14 @@
         const r = await api('/api/servers/' + name + '/auto-stop');
         asSelect.value = String(r.minutes);
         asStatus.textContent = '';
-      } catch (err) {
-        asStatus.textContent = 'error: ' + err.message;
-      }
+      } catch (err) { asStatus.textContent = 'error: ' + err.message; }
 
       asSelect.addEventListener('change', async () => {
         const minutes = parseInt(asSelect.value, 10);
         const previous = asSelect.dataset.previous || '0';
         asStatus.textContent = 'saving...';
         try {
-          await api('/api/servers/' + name + '/auto-stop', {
-            method: 'PUT', body: { minutes },
-          });
+          await api('/api/servers/' + name + '/auto-stop', { method: 'PUT', body: { minutes } });
           asSelect.dataset.previous = String(minutes);
           asStatus.textContent = 'saved.';
           setTimeout(() => { asStatus.textContent = ''; }, 1500);
@@ -351,58 +343,190 @@
       async function loadAutoStopStatus() {
         try {
           const r = await api('/api/servers/' + name + '/auto-stop/status');
-          if (!r.running) {
-            asLive.textContent = 'server is offline.';
-          } else if (r.minutes === 0) {
-            asLive.textContent = 'auto-stop is off.';
-          } else if (r.players === null) {
-            asLive.textContent = 'rcon not responding — cannot determine player count.';
-          } else if (r.players > 0) {
-            asLive.textContent = r.players + ' player' + (r.players !== 1 ? 's' : '') + ' online — server will not auto-stop.';
-          } else if (r.stops_in_seconds !== null) {
-            asLive.textContent = 'no players online — server stops in ' + fmtSeconds(r.stops_in_seconds) + '.';
-          } else {
-            asLive.textContent = 'no players online — timer will start at next check.';
-          }
-        } catch (err) {
-          asLive.textContent = 'status error: ' + err.message;
-        }
+          if (!r.running)              asLive.textContent = 'server is offline.';
+          else if (r.minutes === 0)    asLive.textContent = 'auto-stop is off.';
+          else if (r.players === null) asLive.textContent = 'rcon not responding — cannot determine player count.';
+          else if (r.players > 0)      asLive.textContent = r.players + ' player' + (r.players !== 1 ? 's' : '') + ' online — server will not auto-stop.';
+          else if (r.stops_in_seconds !== null) asLive.textContent = 'no players online — server stops in ' + fmtSeconds(r.stops_in_seconds) + '.';
+          else                         asLive.textContent = 'no players online — timer will start at next check.';
+        } catch (err) { asLive.textContent = 'status error: ' + err.message; }
       }
       loadAutoStopStatus();
-      /* refresh every 10 seconds while the page is open */
       const asInterval = setInterval(loadAutoStopStatus, 10000);
       window.addEventListener('beforeunload', () => clearInterval(asInterval));
 
-      /* ---- game log (logs/latest.log) ---- */
+      /* ---- world download/upload ---- */
+      const wBody = collapsible('world', true);
+      wBody.appendChild(el('p', { class: 'muted' },
+        'download or replace world folders as a zip file. uploads require the server to be stopped.'));
+
+      const wRunningWarn = el('div', { class: 'running-warn' + (server.running ? '' : ' hidden') },
+        '⚠  the server is running. uploads are disabled until you stop it.');
+      wBody.appendChild(wRunningWarn);
+
+      const wFolderSelect = el('select', {});
+      const wRefreshFolders = el('button', { class: 'btn', onclick: () => loadFolders() }, 'refresh list');
+      const wDownload = el('a', { class: 'btn primary', href: '#' }, 'download zip');
+      const wUploadBtn = el('button', { class: 'btn warn' }, 'upload zip (replaces folder)');
+      const wFileInput = el('input', { type: 'file', accept: '.zip', style: 'display:none;' });
+      wUploadBtn.addEventListener('click', () => wFileInput.click());
+      wFileInput.addEventListener('change', () => {
+        if (wFileInput.files[0]) doWorldUpload(wFileInput.files[0]);
+      });
+      const wStatus = el('div', { style: 'margin-top:0.5rem;font-family:monospace;font-size:0.85rem;color:var(--fg-muted,#888);' });
+
+      wBody.appendChild(el('div', { class: 'row' }, [
+        el('label', { class: 'muted' }, 'folder:'),
+        wFolderSelect,
+        wRefreshFolders,
+        wDownload,
+        wUploadBtn,
+        wFileInput,
+      ]));
+      wBody.appendChild(wStatus);
+
+      function updateDownloadHref() {
+        const folder = wFolderSelect.value;
+        wDownload.href = '/api/servers/' + encodeURIComponent(name) + '/world/download?folder=' + encodeURIComponent(folder);
+      }
+      wFolderSelect.addEventListener('change', updateDownloadHref);
+
+      async function loadFolders() {
+        wFolderSelect.innerHTML = '';
+        wStatus.textContent = '';
+        try {
+          const r = await api('/api/servers/' + name + '/world/folders');
+          if (r.folders.length === 0) {
+            wFolderSelect.appendChild(el('option', { value: '' }, '(no world folders found)'));
+            wDownload.style.pointerEvents = 'none';
+            wDownload.style.opacity = '0.5';
+          } else {
+            for (const f of r.folders) {
+              wFolderSelect.appendChild(el('option', { value: f }, f));
+            }
+            wDownload.style.pointerEvents = '';
+            wDownload.style.opacity = '';
+            updateDownloadHref();
+          }
+        } catch (err) {
+          wStatus.textContent = 'error loading folders: ' + err.message;
+        }
+        wUploadBtn.disabled = server.running;
+      }
+      loadFolders();
+
+      async function doWorldUpload(file) {
+        const folder = wFolderSelect.value;
+        if (!folder) {
+          wStatus.textContent = 'pick a folder first.';
+          return;
+        }
+        if (!file.name.toLowerCase().endsWith('.zip')) {
+          wStatus.textContent = 'must be a .zip file.';
+          return;
+        }
+        if (!confirm(
+          'this will DELETE the existing "' + folder + '" folder and replace it with the contents of "' + file.name + '".\n\n' +
+          'this cannot be undone. continue?'
+        )) return;
+
+        wStatus.textContent = 'uploading and extracting ' + file.name + ' (' + formatSize(file.size) + ')... this can take a while.';
+        wUploadBtn.disabled = true;
+
+        const fd = new FormData();
+        fd.append('file', file);
+
+        try {
+          const r = await fetch('/api/servers/' + encodeURIComponent(name) + '/world/upload?folder=' + encodeURIComponent(folder), {
+            method: 'POST',
+            body: fd,
+          });
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.error || 'upload failed');
+          wStatus.textContent = 'replaced "' + folder + '" with ' + data.entries + ' entries (' + formatSize(data.bytes) + ').';
+          wFileInput.value = '';
+          loadFolders();
+        } catch (err) {
+          wStatus.textContent = 'error: ' + err.message;
+        } finally {
+          wUploadBtn.disabled = server.running;
+        }
+      }
+
+      function formatSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+        return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+      }
+
+      /* ---- game log ---- */
       const glBody    = collapsible('game log', true);
-      glBody.appendChild(el('p', { class: 'muted' }, 'in-game events — joins, chat, deaths, commands. last 200 lines of logs/latest.log.'));
-      const glOut     = el('pre', { class: 'console', style: 'max-height: 400px;' }, 'loading...');
-      const glRefresh = el('button', { class: 'btn primary', onclick: () => loadGameLog() }, 'refresh');
-      const glDownload = el('a', {
+      glBody.appendChild(el('p', { class: 'muted' },
+        'in-game events from minecraft. pick a log file to view its full contents. ' +
+        '"latest.log" is the current server run — older runs are stored as compressed .gz files.'));
+
+      const glSelect    = el('select', {});
+      const glRefreshList = el('button', { class: 'btn', onclick: () => loadLogList() }, 'refresh list');
+      const glRefresh   = el('button', { class: 'btn primary', onclick: () => loadGameLog() }, 'load');
+      const glDownloadAll = el('a', {
         class: 'btn',
-        href: '/api/servers/' + encodeURIComponent(name) + '/game-log/download',
-      }, 'download full log');
-      glBody.appendChild(el('div', { class: 'row' }, [glRefresh, glDownload]));
+        href: '/api/servers/' + encodeURIComponent(name) + '/game-log/download-all',
+      }, 'download all logs (zip)');
+      const glOut = el('pre', { class: 'console', style: 'max-height: 500px;' }, 'pick a log and click load.');
+
+      glBody.appendChild(el('div', { class: 'row' }, [
+        el('label', { class: 'muted' }, 'log file:'),
+        glSelect,
+        glRefreshList,
+        glRefresh,
+        glDownloadAll,
+      ]));
       glBody.appendChild(glOut);
 
+      glSelect.addEventListener('change', () => loadGameLog());
+
+      async function loadLogList() {
+        glSelect.innerHTML = '';
+        try {
+          const r = await api('/api/servers/' + name + '/game-log/files');
+          if (r.files.length === 0) {
+            glSelect.appendChild(el('option', { value: '' }, '(no log files yet)'));
+            glOut.textContent = '(no log files yet)';
+            return;
+          }
+          for (const f of r.files) {
+            const label = f.name + '  (' + formatSize(f.size) + (f.gzipped ? ', compressed' : '') + ')';
+            glSelect.appendChild(el('option', { value: f.name }, label));
+          }
+          /* default to latest.log if present, otherwise the first */
+          glSelect.value = r.files[0].name;
+          loadGameLog();
+        } catch (err) {
+          glOut.textContent = 'error listing logs: ' + err.message;
+        }
+      }
+
       async function loadGameLog() {
+        const file = glSelect.value;
+        if (!file) return;
         glRefresh.disabled = true;
         glRefresh.textContent = 'loading...';
+        glOut.textContent = 'loading ' + file + '...';
         try {
-          const r = await api('/api/servers/' + name + '/file?path=' + encodeURIComponent('logs/latest.log'));
-          const lines = r.content.split('\n');
-          glOut.textContent = lines.slice(-200).join('\n');
+          const r = await api('/api/servers/' + name + '/game-log/file?name=' + encodeURIComponent(file));
+          glOut.textContent = r.content || '(empty)';
           glOut.scrollTop = glOut.scrollHeight;
         } catch (err) {
           glOut.textContent = 'error: ' + err.message;
         } finally {
           glRefresh.disabled = false;
-          glRefresh.textContent = 'refresh';
+          glRefresh.textContent = 'load';
         }
       }
-      loadGameLog();
+      loadLogList();
 
-      /* ---- system log (journalctl) ---- */
+      /* ---- system log ---- */
       const slBody     = collapsible('system log', true);
       slBody.appendChild(el('p', { class: 'muted' }, 'recent output from journalctl. last 200 lines of the systemd unit log.'));
       const slOut      = el('pre', { class: 'console', style: 'max-height: 400px;' }, 'loading...');

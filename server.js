@@ -4,7 +4,7 @@
    Listens on 127.0.0.1 only. Cloudflare Tunnel forwards to it.
    Includes:
      - cookie auth + session
-     - multipart support for file uploads
+     - multipart support for file/world uploads (no size limit)
      - api routes for auth / servers / users
      - optional proxy to a local ttyd at 127.0.0.1:7681 (super-only)
      - static dashboard pages from /public
@@ -14,7 +14,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { request as netRequest } from 'node:http';
 
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
@@ -25,12 +24,11 @@ import multipart from '@fastify/multipart';
 import { loadUserFromCookie } from './auth.js';
 
 import authRoutes from './routes/auth.js';
-import serverRoutes, { MAX_UPLOAD_BYTES } from './routes/servers.js';
+import serverRoutes from './routes/servers.js';
 import userRoutes from './routes/users.js';
 
 import { startAutoStop } from './auto-stop.js';
 
-/* load .env */
 function loadEnv() {
   try {
     const txt = readFileSync('.env', 'utf8');
@@ -54,7 +52,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = Fastify({
   logger: { level: process.env.LOG_LEVEL || 'info' },
   trustProxy: process.env.TRUST_PROXY === 'true',
-  bodyLimit: 10 * 1024 * 1024, /* 10MB for non-upload bodies */
+  bodyLimit: 10 * 1024 * 1024, /* 10MB for non-upload JSON bodies */
 });
 
 await app.register(cookie, {
@@ -62,24 +60,22 @@ await app.register(cookie, {
   parseOptions: {},
 });
 
+/* multipart with no upload size limit (worlds can be many GB) */
 await app.register(multipart, {
   limits: {
-    fileSize: MAX_UPLOAD_BYTES,
+    fileSize: Infinity,
     files:    1,
   },
 });
 
-/* populate req.user on every request */
 app.addHook('preHandler', async (req) => {
   await loadUserFromCookie(req);
 });
 
-/* ---------- API routes ---------- */
 await app.register(authRoutes);
 await app.register(serverRoutes);
 await app.register(userRoutes);
 
-/* ---------- terminal proxy (super-operator only) ---------- */
 if (process.env.TERMINAL_ENABLED === 'true') {
   await app.register(httpProxy, {
     upstream: 'http://127.0.0.1:7681',
@@ -94,7 +90,6 @@ if (process.env.TERMINAL_ENABLED === 'true') {
   app.log.info('terminal proxy enabled at /terminal');
 }
 
-/* ---------- static files ---------- */
 await app.register(staticFiles, {
   root:   resolve(__dirname, 'public'),
   prefix: '/',
@@ -118,5 +113,4 @@ try {
   process.exit(1);
 }
 
-/* ---------- background jobs ---------- */
 startAutoStop(app.log);
