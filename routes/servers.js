@@ -18,9 +18,10 @@ import {
 } from '../world.js';
 import { getEmptySince } from '../auto-stop.js';
 import { audit } from '../audit.js';
-import { requireAuth, requireRole, requireSuper } from '../roles.js';
+import { requireAuth, requireRole } from '../roles.js';
 import { spawn } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
+import path from 'node:path';
 import path from 'node:path';
 
 const MC_USERNAME = /^[a-zA-Z0-9_]{3,16}$/;
@@ -293,7 +294,7 @@ export default async function (app) {
 
   /* ---- server creation ---- */
   app.post('/api/servers/create', { preHandler: requireSuper }, async (req, reply) => {
-    const { name, display, type, version, port, rconPort, ramMax, ramMin } = req.body || {};
+    const { name, display, type, version, port, ramMax, ramMin } = req.body || {};
 
     if (!name || !/^[a-z0-9-]+$/.test(name)) {
       return reply.code(400).send({ error: 'Invalid name (lowercase, numbers, and hyphens only)' });
@@ -319,7 +320,7 @@ export default async function (app) {
     const scriptPath = path.join(process.cwd(), 'scripts', 'add-server.js');
 
     const child = spawn(process.execPath, [scriptPath,
-      name, display, type, version, String(port || 0), String(rconPort || 0), ramMax || '4G', ramMin || '2G'
+      name, display, type, version, String(port || 0), '0', ramMax || '4G', ramMin || '2G'
     ], {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
