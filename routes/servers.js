@@ -19,7 +19,9 @@ import {
 import { getEmptySince } from '../auto-stop.js';
 import { audit } from '../audit.js';
 import { requireAuth, requireRole } from '../roles.js';
-import { fork } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { readFileSync, existsSync } from 'node:fs';
+import path from 'node:path';
 import path from 'node:path';
 
 const MC_USERNAME = /^[a-zA-Z0-9_]{3,16}$/;
@@ -267,37 +269,66 @@ export default async function (app) {
   });
 
   /* ---- server creation ---- */
-  app.post('/api/servers/create', { preHandler: requireRole('operator') }, async (req, reply) => {
-    // Strict Superuser enforcement
-    if (!req.user.is_super) {
-      audit(req, 'server.create_denied', req.body.name, { reason: 'not_superuser' });
-      return reply.code(403).send({ 
-        error: 'Forbidden', 
-        detail: 'This action requires Super-Operator privileges.' 
-      });
-    }
+  app.post('/api/servers/create', { preHandler: requireSuper }, async (req, reply) => {
+    const { name, display, type, version, port, rconPort, ramMax, ramMin } = req.body || {};
 
-    const { name, display, type, version, port, rconPort, ramMax, ramMin } = req.body;
-
-    // Security check for the server name
-    if (!/^[a-z0-9-]+$/.test(name)) {
+    if (!name || !/^[a-z0-9-]+$/.test(name)) {
       return reply.code(400).send({ error: 'Invalid name (lowercase, numbers, and hyphens only)' });
     }
 
+    // check a setup isn't already running for this name
+    const statusFile = `/tmp/mcsetup-${name}.json`;
+    if (existsSync(statusFile)) {
+      try {
+        const existing = JSON.parse(readFileSync(statusFile, 'utf8'));
+        if (!existing.done) {
+          return reply.code(409).send({ error: 'Setup already in progress for this server name' });
+        }
+      } catch { /* stale file, ignore */ }
+    }
+
+    // write initial status
+    const { writeFileSync: wfs } = await import('node:fs');
+    wfs(statusFile, JSON.stringify({
+      step: 'queued', message: 'queued', done: false, error: null, ts: Date.now()
+    }));
+
     const scriptPath = path.join(process.cwd(), 'scripts', 'add-server.js');
 
-    // Launch the script in the background
-    const child = fork(scriptPath, [
-      name, display, type, version, port, rconPort, ramMax, ramMin
+    const child = spawn(process.execPath, [scriptPath,
+      name, display, type, version, String(port), String(rconPort), ramMax, ramMin
     ], {
       detached: true,
-      stdio: 'ignore'
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    child.unref(); 
+    // log stdout/stderr to a file for debugging
+    const { createWriteStream } = await import('node:fs');
+    const logStream = createWriteStream(`/tmp/mcsetup-${name}.log`);
+    child.stdout.pipe(logStream);
+    child.stderr.pipe(logStream);
+
+    child.unref();
 
     audit(req, 'server.create_initiated', name, { display, type, version });
-    return { ok: true, message: 'Server creation started in the background.' };
+    return { ok: true, message: 'Server creation started.', statusFile: `/tmp/mcsetup-${name}.json` };
+  });
+
+  /* ---- server creation status (poll this from the frontend) ---- */
+  app.get('/api/servers/create/status', { preHandler: requireSuper }, async (req, reply) => {
+    const { name } = req.query;
+    if (!name) return reply.code(400).send({ error: 'name required' });
+
+    const statusFile = `/tmp/mcsetup-${name}.json`;
+    if (!existsSync(statusFile)) {
+      return reply.code(404).send({ error: 'no setup found for this name' });
+    }
+    try {
+      const data = JSON.parse(readFileSync(statusFile, 'utf8'));
+      return data;
+    } catch {
+      return reply.code(500).send({ error: 'could not read status file' });
+    }
   });
 
   /* ---------- file management ---------- */
