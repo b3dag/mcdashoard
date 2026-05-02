@@ -290,14 +290,11 @@
           api('/api/servers/' + encodeURIComponent(name) + '/metrics'),
           api('/api/servers/' + encodeURIComponent(name) + '/uptime'),
         ]);
-        
-        const last = points[points.length - 1] || {};
 
         metricsStatus.textContent = '';
         const points = metrics.metrics || [];
-        // Check for health alerts based on your monitor.js logic
+        const last = points[points.length - 1] || {};
         const isHighCpu = last.cpu > 90;
-        // Assuming 4G limit as used in your monitor.js helper
         const isHighMem = last.memory > (4 * 1024 * 1024 * 1024 * 0.95); 
 
         if (isHighCpu || isHighMem) {
@@ -308,7 +305,6 @@
             </div>`;
         }
         
-    // ... keep the rest of your chart drawing code ...
         // CPU passes '100' at the end to lock the maximum scale to 100%
         drawLineChart(cpuCanvas, points.map(p => p.cpu), '#4caf50', '%', 100);
         
@@ -326,6 +322,7 @@
           : 'stopped';
         const lastRunText = uptime.last_run_seconds != null ? formatDuration(uptime.last_run_seconds) : '—';
         const total30dText = formatDuration(uptime.total_uptime_last_30_days_seconds);
+
         metricsSummary.textContent =
           'current CPU: ' + currentCpu + '\n' +
           'current memory: ' + currentMem + '\n' +
@@ -828,8 +825,8 @@
       fiBody.appendChild(el('p', { class: 'muted' }, 'browse and edit text files inside the server folder.'));
       fiBody.appendChild(el('p', {}, el('a', { href: '/files.html?name=' + encodeURIComponent(name) }, 'open file browser →')));
     }
+     /* ---- danger zone: remove server ---- */
     if (me.is_super) {
-        /* ---- danger zone: remove server ---- */
         const dzBody = collapsible('danger zone', true);
 
         dzBody.appendChild(el('p', { class: 'muted', style: 'color: #c84040;' },
