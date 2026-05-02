@@ -84,6 +84,13 @@ async function download(url, dest) {
   if (size < 100000) throw new Error(`downloaded file too small (${size} bytes) — probably an error page`);
 }
 
+/* helper to find lowest free port starting from `from`, skipping any in `taken` */
+function pickFreePort(taken, from) {
+  let p = from;
+  while (taken.has(p)) p++;
+  return p;
+}
+
 async function run() {
   let serversCfg;
   try {
@@ -91,6 +98,11 @@ async function run() {
   } catch {
     abort(`${DASHBOARD}/servers.json not found. Is the dashboard installed?`);
   }
+
+  /* gather ports already in use */
+  const usedPorts = new Set(
+    serversCfg.servers.flatMap(s => [s.port, s.rcon?.port].filter(Boolean))
+  );
 
   let name, displayName, typeChoice, mcVersion, port, rconPort, ramMax, ramMin;
 
@@ -100,8 +112,13 @@ async function run() {
     port     = parseInt(port, 10);
     rconPort = parseInt(rconPort, 10);
 
+    // 0 means "auto-pick" — pick lowest available
+    if (!port || port === 0)         port = pickFreePort(usedPorts, 25565);
+    usedPorts.add(port);
+    if (!rconPort || rconPort === 0) rconPort = pickFreePort(usedPorts, 25575);
+
     if (serversCfg.servers.some(s => s.name === name)) abort(`A server named '${name}' already exists.`);
-    progress('init', `starting setup for ${name}`);
+    progress('init', `starting setup for ${name} (port ${port}, rcon ${rconPort})`);
 
   } else {
     /* ---- CLI mode: interactive prompts ---- */
@@ -130,27 +147,15 @@ async function run() {
     typeChoice = await ask('choice (1/2/3)', '1');
     mcVersion  = await ask('minecraft version', '1.21.1');
 
-    const usedPorts = new Set(
-      serversCfg.servers.flatMap(s => [s.port, s.rcon?.port].filter(Boolean))
-    );
-    let defaultPort = 25565; while (usedPorts.has(defaultPort)) defaultPort++;
-    let defaultRcon = 25575; while (usedPorts.has(defaultRcon) || defaultRcon === defaultPort) defaultRcon++;
-
-    while (true) {
-      port = parseInt(await ask('minecraft port', String(defaultPort)), 10);
-      if (usedPorts.has(port)) warn(`Port ${port} is already in use!`);
-      else { usedPorts.add(port); break; }
-    }
-    while (true) {
-      rconPort = parseInt(await ask('rcon port', String(defaultRcon)), 10);
-      if (usedPorts.has(rconPort)) warn(`Port ${rconPort} is already in use!`);
-      else break;
-    }
+    // auto-pick ports — no prompts in CLI mode either
+    port     = pickFreePort(usedPorts, 25565); usedPorts.add(port);
+    rconPort = pickFreePort(usedPorts, 25575);
 
     ramMax = await ask('max RAM (e.g. 4G, 8G)', '4G');
     ramMin = await ask('min RAM', '2G');
     rl.close();
 
+    console.log(`\nports auto-selected: minecraft ${port}, rcon ${rconPort}`);
     console.log('\n\x1b[32mgot it. running setup...\x1b[0m\n');
   }
 

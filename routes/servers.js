@@ -22,6 +22,7 @@ import { requireAuth, requireRole } from '../roles.js';
 import { spawn } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import path from 'node:path';
 
 const MC_USERNAME = /^[a-zA-Z0-9_]{3,16}$/;
 const ALLOWED_AUTO_STOP = [0, 5, 15, 30, 60, 120];
@@ -67,6 +68,30 @@ export default async function (app) {
 
   app.get('/api/servers/:name/status', { preHandler: requireRole('starter') }, async (req) => {
     return getServerStatus(req.params.name);
+  });
+
+  /* connection info: local IP + port for this server */
+  app.get('/api/servers/:name/connection', { preHandler: requireRole('starter') }, async (req, reply) => {
+    const s = getServer(req.params.name);
+    if (!s) return reply.code(404).send({ error: 'unknown server' });
+
+    const os = await import('node:os');
+    const interfaces = os.networkInterfaces();
+    let localIP = null;
+    for (const ifname of Object.keys(interfaces)) {
+      for (const iface of interfaces[ifname] || []) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          localIP = iface.address;
+          break;
+        }
+      }
+      if (localIP) break;
+    }
+
+    return {
+      local_ip: localIP || '127.0.0.1',
+      port: s.port || 25565,
+    };
   });
 
   app.get('/api/servers/:name/metrics', { preHandler: requireRole('starter') }, async (req, reply) => {
@@ -295,7 +320,7 @@ export default async function (app) {
     const scriptPath = path.join(process.cwd(), 'scripts', 'add-server.js');
 
     const child = spawn(process.execPath, [scriptPath,
-      name, display, type, version, String(port), String(rconPort), ramMax, ramMin
+      name, display, type, version, String(port || 0), String(rconPort || 0), ramMax || '4G', ramMin || '2G'
     ], {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],

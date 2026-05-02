@@ -125,6 +125,21 @@
     }
     main.appendChild(power);
 
+    const connBox = el('div', { class: 'mt-2', style: 'padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 6px; background: rgba(255,255,255,0.02);' });
+    connBox.appendChild(el('div', { class: 'muted', style: 'font-size: 0.8rem; margin-bottom: 0.25rem;' }, 'connect from minecraft:'));
+    const connAddr = el('div', { style: 'font-family: monospace; font-size: 1.1rem; user-select: all; cursor: text;' }, 'loading...');
+    connBox.appendChild(connAddr);
+    main.appendChild(connBox);
+
+    (async () => {
+      try {
+        const conn = await api('/api/servers/' + encodeURIComponent(name) + '/connection');
+        connAddr.textContent = conn.local_ip + ':' + conn.port;
+      } catch (err) {
+        connAddr.textContent = 'could not load';
+      }
+    })();
+
     const metricsBody = collapsible('metrics', false);
     metricsBody.appendChild(el('p', { class: 'muted' }, 'server resource usage and uptime. updates every 15 seconds.'));
     const metricsStatus = el('div', { class: 'muted' }, 'loading metrics...');
